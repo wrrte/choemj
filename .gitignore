@@ -1,3 +1,8 @@
-*
-!.gitignore
-!retrieval.py
+__pycache__/
+Drama/
+Drama_modified/
+dreamerv3/
+dubby/
+graduate_research/
+STORM/
+TWISTER/
