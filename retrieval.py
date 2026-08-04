@@ -258,7 +258,7 @@ class RetrievalContextManager:
         Implements lazy recomputation using single frame encoding.
         """
         if not self.enabled or len(self.active_anchors) == 0:
-            return None, None, 0, 0.0
+            return None, None, 0, 0.0, []
             
         popped_anchors = []
         for _ in range(min(max_anchors, len(self.active_anchors))):
@@ -335,6 +335,7 @@ class RetrievalContextManager:
             
         retrieved_obs_list = []
         retrieved_action_list = []
+        retrieved_indices = []
         
         for (p, env_idx) in final_chosen_indices:
             valid = True
@@ -363,10 +364,11 @@ class RetrievalContextManager:
                     
                 retrieved_obs_list.append(obs_tensor)
                 retrieved_action_list.append(action_tensor)
+                retrieved_indices.append(p)
                 
         avg_hit_rate = total_hit_rate / max(1, num_hit_rate_samples)
         if len(retrieved_obs_list) == 0:
-            return None, None, candidates_before_max, avg_hit_rate
+            return None, None, candidates_before_max, avg_hit_rate, []
             
         if replay_buffer.store_on_gpu:
             ret_obs = torch.cat(retrieved_obs_list, dim=1).float() / 255.0
@@ -382,7 +384,7 @@ class RetrievalContextManager:
             ret_action = np.concatenate(retrieved_action_list, axis=1)
             ret_action = torch.from_numpy(ret_action).cuda().transpose(0, 1) # [B, T]
             
-        return ret_obs, ret_action, candidates_before_max, avg_hit_rate
+        return ret_obs, ret_action, candidates_before_max, avg_hit_rate, retrieved_indices
 
     @torch.no_grad()
     def rebuild_all_hash_buckets(self, replay_buffer, world_model, chunk_size=1024):
