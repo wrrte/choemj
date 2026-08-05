@@ -292,7 +292,11 @@ class RetrievalContextManager:
                     continue
                 if replay_buffer.length < self.context_length:
                     continue
-                obs_list.append(replay_buffer.obs_buffer[curr_p:curr_p+1])
+                has_env = (len(replay_buffer.termination_buffer.shape) == 2)
+                if has_env:
+                    obs_list.append(replay_buffer.obs_buffer[curr_p, env_idx:env_idx+1])
+                else:
+                    obs_list.append(replay_buffer.obs_buffer[curr_p:curr_p+1])
                 valid_sampled.append((p, env_idx))
                 
             if not obs_list:
@@ -343,7 +347,11 @@ class RetrievalContextManager:
             action_chunk = []
             for step in range(self.context_length - 1, -1, -1):
                 curr_p = (p - step) % max_buf_len
-                term = replay_buffer.termination_buffer[curr_p]
+                has_env = (len(replay_buffer.termination_buffer.shape) == 2)
+                if has_env:
+                    term = replay_buffer.termination_buffer[curr_p, env_idx]
+                else:
+                    term = replay_buffer.termination_buffer[curr_p]
                 if step > 0 and term > 0.5:
                     valid = False
                     break
@@ -351,8 +359,13 @@ class RetrievalContextManager:
             if valid:
                 for step in range(self.context_length - 1, -1, -1):
                     curr_p = (p - step) % max_buf_len
-                    obs_chunk.append(replay_buffer.obs_buffer[curr_p:curr_p+1])
-                    action_chunk.append(replay_buffer.action_buffer[curr_p:curr_p+1])
+                    has_env = (len(replay_buffer.termination_buffer.shape) == 2)
+                    if has_env:
+                        obs_chunk.append(replay_buffer.obs_buffer[curr_p, env_idx:env_idx+1])
+                        action_chunk.append(replay_buffer.action_buffer[curr_p, env_idx:env_idx+1])
+                    else:
+                        obs_chunk.append(replay_buffer.obs_buffer[curr_p:curr_p+1])
+                        action_chunk.append(replay_buffer.action_buffer[curr_p:curr_p+1])
                     
                 if replay_buffer.store_on_gpu:
                     obs_tensor = torch.stack(obs_chunk, dim=0)
@@ -415,7 +428,11 @@ class RetrievalContextManager:
                     # For simplicity, we just use the current frame without context window check here
                     # since we only need its latent for hashing. 
                     # If it's near termination, it might be an issue, but hashing the single frame is fine.
-                    obs_list.append(replay_buffer.obs_buffer[p:p+1])
+                    has_env = (len(replay_buffer.termination_buffer.shape) == 2)
+                    if has_env:
+                        obs_list.append(replay_buffer.obs_buffer[p, env_idx:env_idx+1])
+                    else:
+                        obs_list.append(replay_buffer.obs_buffer[p:p+1])
                     valid_indices.append((p, env_idx))
                     
             if len(obs_list) == 0:
