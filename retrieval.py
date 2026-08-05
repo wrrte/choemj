@@ -271,7 +271,8 @@ class RetrievalContextManager:
                 obs_batch = replay_buffer.obs_buffer[curr_ptrs]
                 
             obs_batch = obs_batch.float() / 255.0
-            obs_batch = obs_batch.unsqueeze(1)
+            from einops import rearrange
+            obs_batch = rearrange(obs_batch, "N H W C -> N 1 C H W")
             
             with torch.no_grad():
                 encoded = world_model.encode_obs(obs_batch)
@@ -368,7 +369,8 @@ class RetrievalContextManager:
                 obs_chunk = replay_buffer.obs_buffer[p_grid]
                 
             obs_chunk = obs_chunk.reshape(-1, *obs_chunk.shape[2:]).float() / 255.0
-            obs_chunk = obs_chunk.unsqueeze(1)
+            from einops import rearrange
+            obs_chunk = rearrange(obs_chunk, "N H W C -> N 1 C H W")
             
             encoded = world_model.encode_obs(obs_chunk).squeeze(1)
             keys = self._hash_keys(encoded)
