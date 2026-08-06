@@ -227,10 +227,10 @@ class RetrievalContextManager:
         
         max_buf_len = replay_buffer.max_length // replay_buffer.num_envs
         
-        final_chosen_p = []
-        final_chosen_env = []
-        total_hit_rate = 0.0
-        num_hit_rate_samples = 0
+        all_sampled_ptrs = []
+        all_sampled_envs = []
+        all_is_exact = []
+        all_anchor_idx = []
         
         for i in range(pop_count):
             a_ptr = anchor_ptrs[i]
@@ -304,48 +304,70 @@ class RetrievalContextManager:
             if sampled_ptrs.shape[0] == 0:
                 continue
                 
-            curr_ptrs = sampled_ptrs % max_buf_len
+            all_sampled_ptrs.append(sampled_ptrs)
+            all_sampled_envs.append(sampled_envs)
+            all_is_exact.append(is_exact)
+            all_anchor_idx.append(torch.full((sampled_ptrs.shape[0],), i, dtype=torch.long, device=self.device))
             
-            if len(replay_buffer.termination_buffer.shape) == 2:
-                obs_batch = replay_buffer.obs_buffer[curr_ptrs, sampled_envs]
-            else:
-                obs_batch = replay_buffer.obs_buffer[curr_ptrs]
-                
-            obs_batch = obs_batch.float() / 255.0
-            from einops import rearrange
-            obs_batch = rearrange(obs_batch, "N H W C -> N 1 C H W")
+        if len(all_sampled_ptrs) == 0:
+            return None, None, 0, 0.0, []
             
-            with torch.no_grad():
-                encoded = world_model.encode_obs(obs_batch)
-                encoded = encoded.squeeze(1)
-                
-            current_keys = self._hash_keys(encoded)
+        flat_ptrs = torch.cat(all_sampled_ptrs)
+        flat_envs = torch.cat(all_sampled_envs)
+        flat_is_exact = torch.cat(all_is_exact)
+        flat_anchor_idx = torch.cat(all_anchor_idx)
+        
+        curr_ptrs = flat_ptrs % max_buf_len
+        
+        if len(replay_buffer.termination_buffer.shape) == 2:
+            obs_batch = replay_buffer.obs_buffer[curr_ptrs, flat_envs]
+        else:
+            obs_batch = replay_buffer.obs_buffer[curr_ptrs]
             
-            if current_keys.shape[0] > 0:
-                hit_mask = current_keys == a_key
-                
-                # Only use exact candidates to calculate hit rate for global rebuild
-                exact_hit_mask = hit_mask[is_exact]
+        obs_batch = obs_batch.float() / 255.0
+        from einops import rearrange
+        obs_batch = rearrange(obs_batch, "N H W C -> N 1 C H W")
+        
+        with torch.no_grad():
+            encoded = world_model.encode_obs(obs_batch)
+            encoded = encoded.squeeze(1)
+            
+        current_keys = self._hash_keys(encoded)
+        
+        required_keys = anchor_keys[flat_anchor_idx]
+        hit_mask = (current_keys == required_keys)
+        
+        total_hit_rate = 0.0
+        num_hit_rate_samples = 0
+        
+        for i in range(pop_count):
+            anchor_is_exact = flat_is_exact[flat_anchor_idx == i]
+            anchor_hits = hit_mask[flat_anchor_idx == i]
+            
+            if anchor_is_exact.shape[0] > 0 and anchor_is_exact.any():
+                exact_hit_mask = anchor_hits[anchor_is_exact]
                 if exact_hit_mask.shape[0] > 0:
                     hit_rate = exact_hit_mask.float().mean().item()
                     total_hit_rate += hit_rate
                     num_hit_rate_samples += 1
-                
-                matched_ptrs = sampled_ptrs[hit_mask]
-                matched_envs = sampled_envs[hit_mask]
-                
-                if matched_ptrs.shape[0] > target:
-                    matched_ptrs = matched_ptrs[:target]
-                    matched_envs = matched_envs[:target]
                     
-                final_chosen_p.append(matched_ptrs)
-                final_chosen_env.append(matched_envs)
-                
-        if len(final_chosen_p) == 0:
+        valid_anchor_idx = flat_anchor_idx[hit_mask]
+        
+        M = pop_count
+        if valid_anchor_idx.shape[0] > 0:
+            match_matrix = (valid_anchor_idx.unsqueeze(0) == torch.arange(M, device=self.device).unsqueeze(1))
+            match_counts = match_matrix.cumsum(dim=1)
+            keep_matrix = match_matrix & (match_counts <= target)
+            keep_mask_1d = keep_matrix.any(dim=0)
+            
+            p_tensor = flat_ptrs[hit_mask][keep_mask_1d]
+            env_tensor = flat_envs[hit_mask][keep_mask_1d]
+        else:
             return None, None, 0, 0.0, []
             
-        p_tensor = torch.cat(final_chosen_p)
-        env_tensor = torch.cat(final_chosen_env)
+        if p_tensor.shape[0] == 0:
+            return None, None, 0, 0.0, []
+            
         candidates_before_max = p_tensor.shape[0]
         
         if candidates_before_max > max_contexts:
