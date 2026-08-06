@@ -238,20 +238,60 @@ class RetrievalContextManager:
             a_key = anchor_keys[i]
             
             b_len = self.bucket_lens[a_key]
-            if b_len == 0:
+            target_k = multiplier * (target - 1)
+            
+            collected_ptrs = []
+            collected_envs = []
+            collected_is_exact = []
+            
+            exact_sample_k = min(target_k, b_len.item())
+            if exact_sample_k > 0:
+                rand_idx = torch.randperm(b_len.item(), device=self.device)[:exact_sample_k]
+                collected_ptrs.append(self.hash_memory[a_key, rand_idx, 0])
+                collected_envs.append(self.hash_memory[a_key, rand_idx, 1])
+                collected_is_exact.append(torch.ones(exact_sample_k, dtype=torch.bool, device=self.device))
+                
+            remaining_k = target_k - exact_sample_k
+            
+            if remaining_k > 0:
+                bit_shifts = 2 ** torch.arange(self.hash_bits, dtype=torch.long, device=self.device)
+                adj_keys = a_key ^ bit_shifts
+                adj_lens = self.bucket_lens[adj_keys]
+                
+                valid_mask = adj_lens > 0
+                if valid_mask.any():
+                    valid_keys = adj_keys[valid_mask]
+                    valid_lens = adj_lens[valid_mask]
+                    
+                    adj_ptrs = []
+                    adj_envs = []
+                    for vk, vl in zip(valid_keys, valid_lens):
+                        adj_ptrs.append(self.hash_memory[vk, :vl, 0])
+                        adj_envs.append(self.hash_memory[vk, :vl, 1])
+                        
+                    all_adj_ptrs = torch.cat(adj_ptrs)
+                    all_adj_envs = torch.cat(adj_envs)
+                    
+                    total_adj = all_adj_ptrs.shape[0]
+                    adj_sample_k = min(remaining_k, total_adj)
+                    
+                    if adj_sample_k > 0:
+                        rand_idx = torch.randperm(total_adj, device=self.device)[:adj_sample_k]
+                        collected_ptrs.append(all_adj_ptrs[rand_idx])
+                        collected_envs.append(all_adj_envs[rand_idx])
+                        collected_is_exact.append(torch.zeros(adj_sample_k, dtype=torch.bool, device=self.device))
+                        
+            if len(collected_ptrs) == 0:
                 continue
                 
-            sample_k = min(multiplier * (target - 1), b_len.item())
-            if sample_k == 0:
-                continue
-                
-            rand_idx = torch.randperm(b_len.item(), device=self.device)[:sample_k]
-            sampled_ptrs = self.hash_memory[a_key, rand_idx, 0]
-            sampled_envs = self.hash_memory[a_key, rand_idx, 1]
+            sampled_ptrs = torch.cat(collected_ptrs)
+            sampled_envs = torch.cat(collected_envs)
+            is_exact = torch.cat(collected_is_exact)
             
             not_anchor = ~((sampled_ptrs == a_ptr) & (sampled_envs == a_env))
             sampled_ptrs = sampled_ptrs[not_anchor]
             sampled_envs = sampled_envs[not_anchor]
+            is_exact = is_exact[not_anchor]
             
             valid_p = (sampled_ptrs >= 0) | (replay_buffer.length >= max_buf_len)
             valid_len = replay_buffer.length >= self.context_length
@@ -259,6 +299,7 @@ class RetrievalContextManager:
             
             sampled_ptrs = sampled_ptrs[valid]
             sampled_envs = sampled_envs[valid]
+            is_exact = is_exact[valid]
             
             if sampled_ptrs.shape[0] == 0:
                 continue
@@ -282,9 +323,13 @@ class RetrievalContextManager:
             
             if current_keys.shape[0] > 0:
                 hit_mask = current_keys == a_key
-                hit_rate = hit_mask.float().mean().item()
-                total_hit_rate += hit_rate
-                num_hit_rate_samples += 1
+                
+                # Only use exact candidates to calculate hit rate for global rebuild
+                exact_hit_mask = hit_mask[is_exact]
+                if exact_hit_mask.shape[0] > 0:
+                    hit_rate = exact_hit_mask.float().mean().item()
+                    total_hit_rate += hit_rate
+                    num_hit_rate_samples += 1
                 
                 matched_ptrs = sampled_ptrs[hit_mask]
                 matched_envs = sampled_envs[hit_mask]
