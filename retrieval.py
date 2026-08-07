@@ -251,35 +251,7 @@ class RetrievalContextManager:
                 collected_envs.append(self.hash_memory[a_key, rand_idx, 1])
                 collected_is_exact.append(torch.ones(exact_sample_k, dtype=torch.bool, device=self.device))
                 
-            remaining_k = target_k - exact_sample_k
-            
-            if remaining_k > 0:
-                bit_shifts = 2 ** torch.arange(self.hash_bits, dtype=torch.long, device=self.device)
-                adj_keys = a_key ^ bit_shifts
-                adj_lens = self.bucket_lens[adj_keys]
-                
-                valid_mask = adj_lens > 0
-                if valid_mask.any():
-                    valid_keys = adj_keys[valid_mask]
-                    valid_lens = adj_lens[valid_mask]
-                    
-                    adj_ptrs = []
-                    adj_envs = []
-                    for vk, vl in zip(valid_keys, valid_lens):
-                        adj_ptrs.append(self.hash_memory[vk, :vl, 0])
-                        adj_envs.append(self.hash_memory[vk, :vl, 1])
-                        
-                    all_adj_ptrs = torch.cat(adj_ptrs)
-                    all_adj_envs = torch.cat(adj_envs)
-                    
-                    total_adj = all_adj_ptrs.shape[0]
-                    adj_sample_k = min(remaining_k, total_adj)
-                    
-                    if adj_sample_k > 0:
-                        rand_idx = torch.randperm(total_adj, device=self.device)[:adj_sample_k]
-                        collected_ptrs.append(all_adj_ptrs[rand_idx])
-                        collected_envs.append(all_adj_envs[rand_idx])
-                        collected_is_exact.append(torch.zeros(adj_sample_k, dtype=torch.bool, device=self.device))
+
                         
             if len(collected_ptrs) == 0:
                 continue
