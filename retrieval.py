@@ -194,22 +194,24 @@ class RetrievalContextManager:
     def _insert_into_bucket(self, pointers, env_indices, keys):
         self.index_to_bucket[pointers % self.max_buf_len, env_indices] = keys
         
-        bucket_sizes = self.bucket_lens[keys]
-        replace_indices = self.bucket_replace_idx[keys]
-        
-        insert_idx = torch.where(bucket_sizes < self.max_bucket_size, bucket_sizes, replace_indices)
-        
-        self.hash_memory[keys, insert_idx, 0] = pointers
-        self.hash_memory[keys, insert_idx, 1] = env_indices
-        
-        self.bucket_lens[keys] = torch.clamp(bucket_sizes + 1, max=self.max_bucket_size)
-        
-        is_full = bucket_sizes >= self.max_bucket_size
-        self.bucket_replace_idx[keys] = torch.where(
-            is_full, 
-            (replace_indices + 1) % self.max_bucket_size, 
-            replace_indices
-        )
+        M = pointers.shape[0]
+        for i in range(M):
+            p = pointers[i]
+            e = env_indices[i]
+            k = keys[i]
+            
+            b_size = self.bucket_lens[k]
+            r_idx = self.bucket_replace_idx[k]
+            
+            if b_size < self.max_bucket_size:
+                insert_idx = b_size
+                self.bucket_lens[k] += 1
+            else:
+                insert_idx = r_idx
+                self.bucket_replace_idx[k] = (r_idx + 1) % self.max_bucket_size
+                
+            self.hash_memory[k, insert_idx, 0] = p
+            self.hash_memory[k, insert_idx, 1] = e
 
     def retrieve_contexts(self, replay_buffer, world_model, max_anchors, multiplier=5, target=5, max_contexts=256):
         if not self.enabled or self.anchor_count.item() == 0:
