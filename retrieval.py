@@ -80,16 +80,16 @@ class RetrievalContextManager:
         self.z_score_threshold = float(config.get("z_score_threshold", 2.0))
         self.ema_alpha = float(config.get("ema_alpha", 0.01))
         
-        self.ema_mean_pos = torch.zeros(num_envs, device=device)
-        self.ema_var_pos = torch.ones(num_envs, device=device)
-        self.ema_mean_neg = torch.zeros(num_envs, device=device)
-        self.ema_var_neg = torch.ones(num_envs, device=device)
+        self.ema_mean_pos = np.zeros(num_envs)
+        self.ema_var_pos = np.ones(num_envs)
+        self.ema_mean_neg = np.zeros(num_envs)
+        self.ema_var_neg = np.ones(num_envs)
         
         # Hashing config
         self.hash_bits = int(config.get("hash_bits", 12))
         proj = torch.randn(latent_dim, self.hash_bits, dtype=torch.float32, device=device)
         self.hash_proj = proj
-        bit_values = 2 ** torch.arange(self.hash_bits, dtype=torch.long, device=device)
+        bit_values = 2 ** torch.arange(self.hash_bits, dtype=torch.int64, device=device)
         self.hash_bit_values = bit_values
         
         self.hash_memory = {} # key -> FastHashBucket
@@ -104,11 +104,11 @@ class RetrievalContextManager:
 
     def _hash_keys(self, latent):
         if latent.numel() == 0:
-            return torch.zeros(0, dtype=torch.long, device=self.device)
+            return []
         scores = latent.float() @ self.hash_proj.float()
         bits = scores > 0
-        keys = (bits.to(torch.long) * self.hash_bit_values).sum(dim=-1)
-        return keys
+        keys = (bits.to(torch.int64) * self.hash_bit_values).sum(dim=-1)
+        return keys.detach().cpu().tolist()
 
     def add_batch_transitions(self, v_t, base_indexes, base_envs, max_buf_len, skip_len=8):
         if not self.enabled:
@@ -128,29 +128,34 @@ class RetrievalContextManager:
         neg_mask = (delta_v_raw < 0) & valid_mask_2d
         
         if getattr(self, "trigger_mode", "absolute") == "z_score":
+            ema_mean_pos_t = torch.from_numpy(self.ema_mean_pos).to(delta_v_raw.device, dtype=torch.float32)
+            ema_var_pos_t = torch.from_numpy(self.ema_var_pos).to(delta_v_raw.device, dtype=torch.float32)
+            ema_mean_neg_t = torch.from_numpy(self.ema_mean_neg).to(delta_v_raw.device, dtype=torch.float32)
+            ema_var_neg_t = torch.from_numpy(self.ema_var_neg).to(delta_v_raw.device, dtype=torch.float32)
+            
             if pos_mask.any():
                 valid_delta_v_pos = delta_v_raw[pos_mask]
                 env_indices_pos = env_indices_full.unsqueeze(1).expand_as(delta_v_raw)[pos_mask]
                 
-                b_ema_mean_pos = self.ema_mean_pos[env_indices_pos]
-                b_ema_var_pos = self.ema_var_pos[env_indices_pos]
+                b_ema_mean_pos = ema_mean_pos_t[env_indices_pos]
+                b_ema_var_pos = ema_var_pos_t[env_indices_pos]
                 
                 z_scores_pos = torch.abs(valid_delta_v_pos - b_ema_mean_pos) / (torch.sqrt(b_ema_var_pos) + 1e-8)
                 triggered_pos = z_scores_pos >= self.z_score_threshold
                 
                 counts = torch.bincount(env_indices_pos, minlength=self.num_envs).float()
                 sums = torch.bincount(env_indices_pos, weights=valid_delta_v_pos, minlength=self.num_envs)
-                env_means = torch.where(counts > 0, sums / counts, self.ema_mean_pos)
+                env_means = torch.where(counts > 0, sums / counts, ema_mean_pos_t)
                 
                 sq_sums = torch.bincount(env_indices_pos, weights=valid_delta_v_pos**2, minlength=self.num_envs)
-                env_vars = torch.where(counts > 0, (sq_sums / counts) - env_means**2, torch.zeros_like(self.ema_var_pos))
+                env_vars = torch.where(counts > 0, (sq_sums / counts) - env_means**2, torch.zeros_like(ema_var_pos_t))
                 
                 update_mask = counts > 0
-                diff = env_means - self.ema_mean_pos
-                new_mean = torch.where(update_mask, self.ema_mean_pos + self.ema_alpha * diff, self.ema_mean_pos)
-                new_var = (1 - self.ema_alpha) * (self.ema_var_pos + self.ema_alpha * (env_vars + diff**2))
-                self.ema_mean_pos = new_mean
-                self.ema_var_pos = torch.where(update_mask, new_var, self.ema_var_pos)
+                diff = env_means - ema_mean_pos_t
+                new_mean = torch.where(update_mask, ema_mean_pos_t + self.ema_alpha * diff, ema_mean_pos_t)
+                new_var = (1 - self.ema_alpha) * (ema_var_pos_t + self.ema_alpha * (env_vars + diff**2))
+                self.ema_mean_pos = new_mean.cpu().numpy()
+                self.ema_var_pos = torch.where(update_mask, new_var, ema_var_pos_t).cpu().numpy()
             else:
                 triggered_pos = torch.zeros(0, dtype=torch.bool, device=delta_v_raw.device)
                 
@@ -158,25 +163,25 @@ class RetrievalContextManager:
                 valid_delta_v_neg = torch.abs(delta_v_raw[neg_mask])
                 env_indices_neg = env_indices_full.unsqueeze(1).expand_as(delta_v_raw)[neg_mask]
                 
-                b_ema_mean_neg = self.ema_mean_neg[env_indices_neg]
-                b_ema_var_neg = self.ema_var_neg[env_indices_neg]
+                b_ema_mean_neg = ema_mean_neg_t[env_indices_neg]
+                b_ema_var_neg = ema_var_neg_t[env_indices_neg]
                 
                 z_scores_neg = torch.abs(valid_delta_v_neg - b_ema_mean_neg) / (torch.sqrt(b_ema_var_neg) + 1e-8)
                 triggered_neg = z_scores_neg >= self.z_score_threshold
                 
                 counts = torch.bincount(env_indices_neg, minlength=self.num_envs).float()
                 sums = torch.bincount(env_indices_neg, weights=valid_delta_v_neg, minlength=self.num_envs)
-                env_means = torch.where(counts > 0, sums / counts, self.ema_mean_neg)
+                env_means = torch.where(counts > 0, sums / counts, ema_mean_neg_t)
                 
                 sq_sums = torch.bincount(env_indices_neg, weights=valid_delta_v_neg**2, minlength=self.num_envs)
-                env_vars = torch.where(counts > 0, (sq_sums / counts) - env_means**2, torch.zeros_like(self.ema_var_neg))
+                env_vars = torch.where(counts > 0, (sq_sums / counts) - env_means**2, torch.zeros_like(ema_var_neg_t))
                 
                 update_mask = counts > 0
-                diff = env_means - self.ema_mean_neg
-                new_mean = torch.where(update_mask, self.ema_mean_neg + self.ema_alpha * diff, self.ema_mean_neg)
-                new_var = (1 - self.ema_alpha) * (self.ema_var_neg + self.ema_alpha * (env_vars + diff**2))
-                self.ema_mean_neg = new_mean
-                self.ema_var_neg = torch.where(update_mask, new_var, self.ema_var_neg)
+                diff = env_means - ema_mean_neg_t
+                new_mean = torch.where(update_mask, ema_mean_neg_t + self.ema_alpha * diff, ema_mean_neg_t)
+                new_var = (1 - self.ema_alpha) * (ema_var_neg_t + self.ema_alpha * (env_vars + diff**2))
+                self.ema_mean_neg = new_mean.cpu().numpy()
+                self.ema_var_neg = torch.where(update_mask, new_var, ema_var_neg_t).cpu().numpy()
             else:
                 triggered_neg = torch.zeros(0, dtype=torch.bool, device=delta_v_raw.device)
                 
@@ -185,30 +190,25 @@ class RetrievalContextManager:
             triggered_neg = torch.abs(delta_v_raw[neg_mask]) >= self.threshold if neg_mask.any() else torch.zeros(0, dtype=torch.bool, device=delta_v_raw.device)
 
         def process_triggers(mask, triggered_subset, sign):
-            if not (mask.any() and triggered_subset.any()):
-                return 0
-                
-            mask_indices = mask.nonzero(as_tuple=False)
-            triggered_full_indices = mask_indices[triggered_subset]
-            
-            orig_b_idx = triggered_full_indices[:, 0]
-            t_idx = triggered_full_indices[:, 1]
-            
-            env_idxs = torch.from_numpy(base_envs).to(self.device)[orig_b_idx]
-            base_ptrs = torch.from_numpy(base_indexes).to(self.device)[orig_b_idx]
-            
-            anchor_ptrs = (base_ptrs + skip_len + 1 + t_idx + self.anchor_offset) % max_buf_len
-            
-            anchor_ptrs_list = anchor_ptrs.tolist()
-            env_idxs_list = env_idxs.tolist()
-            
             num_trig = 0
-            for a_ptr, e_idx in zip(anchor_ptrs_list, env_idxs_list):
-                a_key = self.index_to_bucket.get((a_ptr, e_idx), -1)
-                if a_key != -1:
-                    anchor = (a_ptr, e_idx, sign)
-                    self.active_anchors.append((anchor, a_key))
-                    num_trig += 1
+            if mask.any() and triggered_subset.any():
+                mask_indices = mask.nonzero(as_tuple=False)
+                triggered_full_indices = mask_indices[triggered_subset]
+                
+                for idx in range(triggered_full_indices.shape[0]):
+                    orig_b_idx = triggered_full_indices[idx, 0].item()
+                    t_idx = triggered_full_indices[idx, 1].item()
+                    
+                    env_idx = base_envs[orig_b_idx]
+                    base_ptr = base_indexes[orig_b_idx]
+                    
+                    anchor_ptr = int(base_ptr + skip_len + 1 + t_idx + self.anchor_offset) % max_buf_len
+                    
+                    anchor_key = self.index_to_bucket.get((anchor_ptr, env_idx), -1)
+                    if anchor_key != -1:
+                        anchor = (anchor_ptr, env_idx, sign)
+                        self.active_anchors.append((anchor, anchor_key))
+                        num_trig += 1
             return num_trig
             
         num_triggered_pos = process_triggers(pos_mask, triggered_pos, sign=1)
@@ -224,7 +224,7 @@ class RetrievalContextManager:
         if not self.enabled:
             return 0
             
-        keys = self._hash_keys(latent_b).tolist()
+        keys = self._hash_keys(latent_b)
         
         for i in range(self.num_envs):
             if env_idx != -1 and i != env_idx:
@@ -318,7 +318,7 @@ class RetrievalContextManager:
                 encoded = world_model.encode_obs(obs_tensor) # [N, 1, latent_dim]
                 encoded = encoded.squeeze(1) # [N, latent_dim]
                 
-            current_keys = self._hash_keys(encoded).tolist()
+            current_keys = self._hash_keys(encoded)
             
             if len(current_keys) > 0:
                 hit_rate = (torch.tensor(current_keys) == anchor_key).float().mean().item()
