@@ -284,12 +284,11 @@ class RetrievalContextManager:
         total_hit_rate = 0.0
         num_hit_rate_samples = 0
         
-        # Phase 1: Candidate Collection
-        anchors_data = [] # List of (anchor_key, valid_sampled, start_idx, end_idx)
-        flat_curr_p = []
-        flat_env_idx = []
+        all_obs_tensors = []
+        anchor_candidate_info = [] # store (anchor_key, valid_sampled, num_candidates)
         
         for anchor_tuple, anchor_key in popped_anchors:
+            # anchor_tuple is (anchor_ptr, env_idx, sign)
             anchor_ptr, anchor_env_idx, sign = anchor_tuple
             queue = self.hash_memory.get(anchor_key)
             if not queue:
@@ -299,49 +298,53 @@ class RetrievalContextManager:
             if not sampled_indices:
                 continue
                 
+            obs_list = []
             valid_sampled = []
-            start_idx = len(flat_curr_p)
             for (p, env_idx) in sampled_indices:
                 curr_p = p % max_buf_len
                 if not replay_buffer.store_on_gpu and p < 0 and replay_buffer.length < max_buf_len:
                     continue
                 if replay_buffer.length < self.context_length:
                     continue
-                flat_curr_p.append(curr_p)
-                flat_env_idx.append(env_idx)
+                obs_list.append(replay_buffer.obs_buffer[curr_p, env_idx:env_idx+1])
                 valid_sampled.append((p, env_idx))
                 
-            if len(valid_sampled) > 0:
-                end_idx = len(flat_curr_p)
-                anchors_data.append((anchor_key, valid_sampled, start_idx, end_idx))
+            if not obs_list:
+                continue
                 
-        # Phase 2: Advanced Slicing
-        if len(flat_curr_p) > 0:
             if replay_buffer.store_on_gpu:
-                obs_tensor = replay_buffer.obs_buffer[flat_curr_p, flat_env_idx].float() / 255.0
+                obs_tensor = torch.cat(obs_list, dim=0).float() / 255.0
             else:
                 import numpy as np
-                obs_arr = replay_buffer.obs_buffer[flat_curr_p, flat_env_idx]
+                obs_arr = np.concatenate(obs_list, axis=0)
                 obs_tensor = torch.from_numpy(obs_arr).float().cuda() / 255.0
                 
             from einops import rearrange
             obs_tensor = rearrange(obs_tensor, "N H W C -> N 1 C H W")
             
-            # Phase 3: Small batch inference per anchor to preserve CuDNN consistency
-            for anchor_key, valid_sampled, start_idx, end_idx in anchors_data:
-                anchor_obs = obs_tensor[start_idx:end_idx].contiguous()
-                
-                with torch.no_grad():
-                    encoded = world_model.encode_obs(anchor_obs)
-                    encoded = encoded.squeeze(1)
-                    
-                current_keys = self._hash_keys(encoded)
+            all_obs_tensors.append(obs_tensor)
+            anchor_candidate_info.append((anchor_key, valid_sampled, obs_tensor.shape[0]))
+            
+        if len(all_obs_tensors) > 0:
+            massive_obs_tensor = torch.cat(all_obs_tensors, dim=0)
+            with torch.no_grad():
+                encoded = world_model.encode_obs(massive_obs_tensor)
+                encoded = encoded.squeeze(1)
+            
+            all_current_keys = self._hash_keys(encoded)
+            
+            # Split back
+            current_idx = 0
+            for anchor_key, valid_sampled, num_candidates in anchor_candidate_info:
+                current_keys = all_current_keys[current_idx : current_idx + num_candidates]
+                current_idx += num_candidates
                 
                 if len(current_keys) > 0:
                     hit_rate = (torch.tensor(current_keys) == anchor_key).float().mean().item()
                     total_hit_rate += hit_rate
                     num_hit_rate_samples += 1
                 
+                # Filter matches
                 matched_indices = []
                 for i_c, k_c in enumerate(current_keys):
                     if k_c == anchor_key:
