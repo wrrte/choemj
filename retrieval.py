@@ -190,25 +190,30 @@ class RetrievalContextManager:
             triggered_neg = torch.abs(delta_v_raw[neg_mask]) >= self.threshold if neg_mask.any() else torch.zeros(0, dtype=torch.bool, device=delta_v_raw.device)
 
         def process_triggers(mask, triggered_subset, sign):
-            num_trig = 0
-            if mask.any() and triggered_subset.any():
-                mask_indices = mask.nonzero(as_tuple=False)
-                triggered_full_indices = mask_indices[triggered_subset]
+            if not (mask.any() and triggered_subset.any()):
+                return 0
                 
-                for idx in range(triggered_full_indices.shape[0]):
-                    orig_b_idx = triggered_full_indices[idx, 0].item()
-                    t_idx = triggered_full_indices[idx, 1].item()
-                    
-                    env_idx = base_envs[orig_b_idx]
-                    base_ptr = base_indexes[orig_b_idx]
-                    
-                    anchor_ptr = int(base_ptr + skip_len + 1 + t_idx + self.anchor_offset) % max_buf_len
-                    
-                    anchor_key = self.index_to_bucket.get((anchor_ptr, env_idx), -1)
-                    if anchor_key != -1:
-                        anchor = (anchor_ptr, env_idx, sign)
-                        self.active_anchors.append((anchor, anchor_key))
-                        num_trig += 1
+            mask_indices = mask.nonzero(as_tuple=False)
+            triggered_full_indices = mask_indices[triggered_subset]
+            
+            orig_b_idx = triggered_full_indices[:, 0]
+            t_idx = triggered_full_indices[:, 1]
+            
+            env_idxs = torch.from_numpy(base_envs).to(self.device)[orig_b_idx]
+            base_ptrs = torch.from_numpy(base_indexes).to(self.device)[orig_b_idx]
+            
+            anchor_ptrs = (base_ptrs + skip_len + 1 + t_idx + self.anchor_offset) % max_buf_len
+            
+            anchor_ptrs_list = anchor_ptrs.tolist()
+            env_idxs_list = env_idxs.tolist()
+            
+            num_trig = 0
+            for a_ptr, e_idx in zip(anchor_ptrs_list, env_idxs_list):
+                a_key = self.index_to_bucket.get((a_ptr, e_idx), -1)
+                if a_key != -1:
+                    anchor = (a_ptr, e_idx, sign)
+                    self.active_anchors.append((anchor, a_key))
+                    num_trig += 1
             return num_trig
             
         num_triggered_pos = process_triggers(pos_mask, triggered_pos, sign=1)
