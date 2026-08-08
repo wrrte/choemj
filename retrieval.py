@@ -284,8 +284,12 @@ class RetrievalContextManager:
         total_hit_rate = 0.0
         num_hit_rate_samples = 0
         
+        # Phase 1: Candidate Collection
+        anchors_data = [] # List of (anchor_key, valid_sampled, start_idx, end_idx)
+        flat_curr_p = []
+        flat_env_idx = []
+        
         for anchor_tuple, anchor_key in popped_anchors:
-            # anchor_tuple is (anchor_ptr, env_idx, sign)
             anchor_ptr, anchor_env_idx, sign = anchor_tuple
             queue = self.hash_memory.get(anchor_key)
             if not queue:
@@ -295,50 +299,57 @@ class RetrievalContextManager:
             if not sampled_indices:
                 continue
                 
-            obs_list = []
             valid_sampled = []
+            start_idx = len(flat_curr_p)
             for (p, env_idx) in sampled_indices:
                 curr_p = p % max_buf_len
                 if not replay_buffer.store_on_gpu and p < 0 and replay_buffer.length < max_buf_len:
                     continue
                 if replay_buffer.length < self.context_length:
                     continue
-                obs_list.append(replay_buffer.obs_buffer[curr_p, env_idx:env_idx+1])
+                flat_curr_p.append(curr_p)
+                flat_env_idx.append(env_idx)
                 valid_sampled.append((p, env_idx))
                 
-            if not obs_list:
-                continue
+            if len(valid_sampled) > 0:
+                end_idx = len(flat_curr_p)
+                anchors_data.append((anchor_key, valid_sampled, start_idx, end_idx))
                 
+        # Phase 2: Advanced Slicing
+        if len(flat_curr_p) > 0:
             if replay_buffer.store_on_gpu:
-                obs_tensor = torch.cat(obs_list, dim=0).float() / 255.0
+                obs_tensor = replay_buffer.obs_buffer[flat_curr_p, flat_env_idx].float() / 255.0
             else:
                 import numpy as np
-                obs_arr = np.concatenate(obs_list, axis=0)
+                obs_arr = replay_buffer.obs_buffer[flat_curr_p, flat_env_idx]
                 obs_tensor = torch.from_numpy(obs_arr).float().cuda() / 255.0
                 
             from einops import rearrange
             obs_tensor = rearrange(obs_tensor, "N H W C -> N 1 C H W")
             
-            with torch.no_grad():
-                encoded = world_model.encode_obs(obs_tensor) # [N, 1, latent_dim]
-                encoded = encoded.squeeze(1) # [N, latent_dim]
+            # Phase 3: Small batch inference per anchor to preserve CuDNN consistency
+            for anchor_key, valid_sampled, start_idx, end_idx in anchors_data:
+                anchor_obs = obs_tensor[start_idx:end_idx].contiguous()
                 
-            current_keys = self._hash_keys(encoded)
-            
-            if len(current_keys) > 0:
-                hit_rate = (torch.tensor(current_keys) == anchor_key).float().mean().item()
-                total_hit_rate += hit_rate
-                num_hit_rate_samples += 1
-            
-            # Filter matches
-            matched_indices = []
-            for i_c, k_c in enumerate(current_keys):
-                if k_c == anchor_key:
-                    matched_indices.append(valid_sampled[i_c])
-                    if len(matched_indices) >= target:
-                        break
-                        
-            final_chosen_indices.extend(matched_indices)
+                with torch.no_grad():
+                    encoded = world_model.encode_obs(anchor_obs)
+                    encoded = encoded.squeeze(1)
+                    
+                current_keys = self._hash_keys(encoded)
+                
+                if len(current_keys) > 0:
+                    hit_rate = (torch.tensor(current_keys) == anchor_key).float().mean().item()
+                    total_hit_rate += hit_rate
+                    num_hit_rate_samples += 1
+                
+                matched_indices = []
+                for i_c, k_c in enumerate(current_keys):
+                    if k_c == anchor_key:
+                        matched_indices.append(valid_sampled[i_c])
+                        if len(matched_indices) >= target:
+                            break
+                            
+                final_chosen_indices.extend(matched_indices)
             
         candidates_before_max = len(final_chosen_indices)
         if len(final_chosen_indices) > max_contexts:
