@@ -284,9 +284,6 @@ class RetrievalContextManager:
         total_hit_rate = 0.0
         num_hit_rate_samples = 0
         
-        all_obs_tensors = []
-        anchor_candidate_info = [] # store (anchor_key, valid_sampled, num_candidates)
-        
         for anchor_tuple, anchor_key in popped_anchors:
             # anchor_tuple is (anchor_ptr, env_idx, sign)
             anchor_ptr, anchor_env_idx, sign = anchor_tuple
@@ -322,37 +319,26 @@ class RetrievalContextManager:
             from einops import rearrange
             obs_tensor = rearrange(obs_tensor, "N H W C -> N 1 C H W")
             
-            all_obs_tensors.append(obs_tensor)
-            anchor_candidate_info.append((anchor_key, valid_sampled, obs_tensor.shape[0]))
-            
-        if len(all_obs_tensors) > 0:
-            massive_obs_tensor = torch.cat(all_obs_tensors, dim=0)
             with torch.no_grad():
-                encoded = world_model.encode_obs(massive_obs_tensor)
-                encoded = encoded.squeeze(1)
-            
-            all_current_keys = self._hash_keys(encoded)
-            
-            # Split back
-            current_idx = 0
-            for anchor_key, valid_sampled, num_candidates in anchor_candidate_info:
-                current_keys = all_current_keys[current_idx : current_idx + num_candidates]
-                current_idx += num_candidates
+                encoded = world_model.encode_obs(obs_tensor) # [N, 1, latent_dim]
+                encoded = encoded.squeeze(1) # [N, latent_dim]
                 
-                if len(current_keys) > 0:
-                    hit_rate = (torch.tensor(current_keys) == anchor_key).float().mean().item()
-                    total_hit_rate += hit_rate
-                    num_hit_rate_samples += 1
-                
-                # Filter matches
-                matched_indices = []
-                for i_c, k_c in enumerate(current_keys):
-                    if k_c == anchor_key:
-                        matched_indices.append(valid_sampled[i_c])
-                        if len(matched_indices) >= target:
-                            break
-                            
-                final_chosen_indices.extend(matched_indices)
+            current_keys = self._hash_keys(encoded)
+            
+            if len(current_keys) > 0:
+                hit_rate = (torch.tensor(current_keys) == anchor_key).float().mean().item()
+                total_hit_rate += hit_rate
+                num_hit_rate_samples += 1
+            
+            # Filter matches
+            matched_indices = []
+            for i_c, k_c in enumerate(current_keys):
+                if k_c == anchor_key:
+                    matched_indices.append(valid_sampled[i_c])
+                    if len(matched_indices) >= target:
+                        break
+                        
+            final_chosen_indices.extend(matched_indices)
             
         candidates_before_max = len(final_chosen_indices)
         if len(final_chosen_indices) > max_contexts:
