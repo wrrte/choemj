@@ -143,19 +143,16 @@ class RetrievalContextManager:
                 z_scores_pos = torch.abs(valid_delta_v_pos - b_ema_mean_pos) / (torch.sqrt(b_ema_var_pos) + 1e-8)
                 triggered_pos = z_scores_pos >= self.z_score_threshold
                 
-                counts = torch.bincount(env_indices_pos, minlength=self.num_envs).float()
-                sums = torch.bincount(env_indices_pos, weights=valid_delta_v_pos, minlength=self.num_envs)
-                env_means = torch.where(counts > 0, sums / counts, ema_mean_pos_t)
-                
-                sq_sums = torch.bincount(env_indices_pos, weights=valid_delta_v_pos**2, minlength=self.num_envs)
-                env_vars = torch.where(counts > 0, (sq_sums / counts) - env_means**2, torch.zeros_like(ema_var_pos_t))
-                
-                update_mask = counts > 0
-                diff = env_means - ema_mean_pos_t
-                new_mean = torch.where(update_mask, ema_mean_pos_t + self.ema_alpha * diff, ema_mean_pos_t)
-                new_var = (1 - self.ema_alpha) * (ema_var_pos_t + self.ema_alpha * (env_vars + diff**2))
-                self.ema_mean_pos = new_mean.cpu().numpy()
-                self.ema_var_pos = torch.where(update_mask, new_var, ema_var_pos_t).cpu().numpy()
+                for i in range(self.num_envs):
+                    env_mask = (env_indices_pos == i)
+                    if env_mask.any():
+                        env_delta_v = valid_delta_v_pos[env_mask]
+                        env_mean = env_delta_v.mean().item()
+                        env_var = env_delta_v.var(unbiased=False).item() if env_delta_v.numel() > 1 else 0.0
+                        
+                        diff = env_mean - self.ema_mean_pos[i]
+                        self.ema_mean_pos[i] += self.ema_alpha * diff
+                        self.ema_var_pos[i] = (1 - self.ema_alpha) * (self.ema_var_pos[i] + self.ema_alpha * (env_var + diff**2))
             else:
                 triggered_pos = torch.zeros(0, dtype=torch.bool, device=delta_v_raw.device)
                 
@@ -169,19 +166,16 @@ class RetrievalContextManager:
                 z_scores_neg = torch.abs(valid_delta_v_neg - b_ema_mean_neg) / (torch.sqrt(b_ema_var_neg) + 1e-8)
                 triggered_neg = z_scores_neg >= self.z_score_threshold
                 
-                counts = torch.bincount(env_indices_neg, minlength=self.num_envs).float()
-                sums = torch.bincount(env_indices_neg, weights=valid_delta_v_neg, minlength=self.num_envs)
-                env_means = torch.where(counts > 0, sums / counts, ema_mean_neg_t)
-                
-                sq_sums = torch.bincount(env_indices_neg, weights=valid_delta_v_neg**2, minlength=self.num_envs)
-                env_vars = torch.where(counts > 0, (sq_sums / counts) - env_means**2, torch.zeros_like(ema_var_neg_t))
-                
-                update_mask = counts > 0
-                diff = env_means - ema_mean_neg_t
-                new_mean = torch.where(update_mask, ema_mean_neg_t + self.ema_alpha * diff, ema_mean_neg_t)
-                new_var = (1 - self.ema_alpha) * (ema_var_neg_t + self.ema_alpha * (env_vars + diff**2))
-                self.ema_mean_neg = new_mean.cpu().numpy()
-                self.ema_var_neg = torch.where(update_mask, new_var, ema_var_neg_t).cpu().numpy()
+                for i in range(self.num_envs):
+                    env_mask = (env_indices_neg == i)
+                    if env_mask.any():
+                        env_delta_v = valid_delta_v_neg[env_mask]
+                        env_mean = env_delta_v.mean().item()
+                        env_var = env_delta_v.var(unbiased=False).item() if env_delta_v.numel() > 1 else 0.0
+                        
+                        diff = env_mean - self.ema_mean_neg[i]
+                        self.ema_mean_neg[i] += self.ema_alpha * diff
+                        self.ema_var_neg[i] = (1 - self.ema_alpha) * (self.ema_var_neg[i] + self.ema_alpha * (env_var + diff**2))
             else:
                 triggered_neg = torch.zeros(0, dtype=torch.bool, device=delta_v_raw.device)
                 
@@ -190,30 +184,25 @@ class RetrievalContextManager:
             triggered_neg = torch.abs(delta_v_raw[neg_mask]) >= self.threshold if neg_mask.any() else torch.zeros(0, dtype=torch.bool, device=delta_v_raw.device)
 
         def process_triggers(mask, triggered_subset, sign):
-            if not (mask.any() and triggered_subset.any()):
-                return 0
-                
-            mask_indices = mask.nonzero(as_tuple=False)
-            triggered_full_indices = mask_indices[triggered_subset]
-            
-            orig_b_idx = triggered_full_indices[:, 0]
-            t_idx = triggered_full_indices[:, 1]
-            
-            env_idxs = torch.from_numpy(base_envs).to(self.device)[orig_b_idx]
-            base_ptrs = torch.from_numpy(base_indexes).to(self.device)[orig_b_idx]
-            
-            anchor_ptrs = (base_ptrs + skip_len + 1 + t_idx + self.anchor_offset) % max_buf_len
-            
-            anchor_ptrs_list = anchor_ptrs.tolist()
-            env_idxs_list = env_idxs.tolist()
-            
             num_trig = 0
-            for a_ptr, e_idx in zip(anchor_ptrs_list, env_idxs_list):
-                a_key = self.index_to_bucket.get((a_ptr, e_idx), -1)
-                if a_key != -1:
-                    anchor = (a_ptr, e_idx, sign)
-                    self.active_anchors.append((anchor, a_key))
-                    num_trig += 1
+            if mask.any() and triggered_subset.any():
+                mask_indices = mask.nonzero(as_tuple=False)
+                triggered_full_indices = mask_indices[triggered_subset]
+                
+                for idx in range(triggered_full_indices.shape[0]):
+                    orig_b_idx = triggered_full_indices[idx, 0].item()
+                    t_idx = triggered_full_indices[idx, 1].item()
+                    
+                    env_idx = base_envs[orig_b_idx]
+                    base_ptr = base_indexes[orig_b_idx]
+                    
+                    anchor_ptr = int(base_ptr + skip_len + 1 + t_idx + self.anchor_offset) % max_buf_len
+                    
+                    anchor_key = self.index_to_bucket.get((anchor_ptr, env_idx), -1)
+                    if anchor_key != -1:
+                        anchor = (anchor_ptr, env_idx, sign)
+                        self.active_anchors.append((anchor, anchor_key))
+                        num_trig += 1
             return num_trig
             
         num_triggered_pos = process_triggers(pos_mask, triggered_pos, sign=1)
@@ -417,30 +406,36 @@ class RetrievalContextManager:
             end_idx = min(start_idx + chunk_size, valid_len)
             current_chunk_size = end_idx - start_idx
             
-            # Extract observation chunk natively using advanced slicing.
-            chunk_obs = replay_buffer.obs_buffer[start_idx:end_idx]
+            # Prepare observations for the chunk across all envs
+            obs_list = []
+            valid_indices = []
             
+            for p in range(start_idx, end_idx):
+                for env_idx in range(replay_buffer.num_envs):
+                    # For simplicity, we just use the current frame without context window check here
+                    # since we only need its latent for hashing. 
+                    # If it's near termination, it might be an issue, but hashing the single frame is fine.
+                    obs_list.append(replay_buffer.obs_buffer[p, env_idx:env_idx+1])
+                    valid_indices.append((p, env_idx))
+                    
+            if len(obs_list) == 0:
+                continue
+                
             if replay_buffer.store_on_gpu:
-                obs_tensor = chunk_obs.float() / 255.0
+                obs_tensor = torch.cat(obs_list, dim=0).float() / 255.0
             else:
                 import numpy as np
-                obs_tensor = torch.from_numpy(chunk_obs).float().cuda() / 255.0
+                obs_arr = np.concatenate(obs_list, axis=0)
+                obs_tensor = torch.from_numpy(obs_arr).float().cuda() / 255.0
                 
             from einops import rearrange
-            # Flatten T and E dimensions into batch N for encode_obs
-            obs_tensor = rearrange(obs_tensor, "T E H W C -> (T E) 1 C H W")
+            obs_tensor = rearrange(obs_tensor, "N H W C -> N 1 C H W")
             
             encoded = world_model.encode_obs(obs_tensor)
             encoded = encoded.squeeze(1)
-            keys = self._hash_keys(encoded) # Safe Python list
+            keys = self._hash_keys(encoded)
             
-            # Generate valid indices using tensor operations
-            # p ranges from start_idx to end_idx, repeated for each env
-            # e_idx loops 0 to num_envs for each p
-            p_indices = torch.arange(start_idx, end_idx).view(-1, 1).expand(current_chunk_size, replay_buffer.num_envs).flatten().tolist()
-            e_indices = torch.arange(replay_buffer.num_envs).view(1, -1).expand(current_chunk_size, replay_buffer.num_envs).flatten().tolist()
-            
-            for p, e_idx, key in zip(p_indices, e_indices, keys):
-                self._insert_into_bucket(p, e_idx, key)
+            for (p, env_idx), key in zip(valid_indices, keys):
+                self._insert_into_bucket(p, env_idx, key)
                 
         print(f"[Retrieval] Global Rebuild completed. Re-hashed {valid_len * replay_buffer.num_envs} frames.")
