@@ -284,62 +284,68 @@ class RetrievalContextManager:
         total_hit_rate = 0.0
         num_hit_rate_samples = 0
         
-        for anchor_tuple, anchor_key in popped_anchors:
-            # anchor_tuple is (anchor_ptr, env_idx, sign)
+        # Phase 1: Candidate Collection
+        flat_candidates = []
+        for anchor_idx, (anchor_tuple, anchor_key) in enumerate(popped_anchors):
             anchor_ptr, anchor_env_idx, sign = anchor_tuple
             queue = self.hash_memory.get(anchor_key)
             if not queue:
                 continue
                 
             sampled_indices = queue.sample(k=multiplier*(target-1), exclude=(anchor_ptr, anchor_env_idx))
-            if not sampled_indices:
-                continue
-                
-            obs_list = []
-            valid_sampled = []
             for (p, env_idx) in sampled_indices:
                 curr_p = p % max_buf_len
                 if not replay_buffer.store_on_gpu and p < 0 and replay_buffer.length < max_buf_len:
                     continue
                 if replay_buffer.length < self.context_length:
                     continue
-                obs_list.append(replay_buffer.obs_buffer[curr_p, env_idx:env_idx+1])
-                valid_sampled.append((p, env_idx))
+                flat_candidates.append((curr_p, env_idx, p, anchor_key, anchor_idx))
                 
-            if not obs_list:
-                continue
-                
-            if replay_buffer.store_on_gpu:
-                obs_tensor = torch.cat(obs_list, dim=0).float() / 255.0
-            else:
-                import numpy as np
-                obs_arr = np.concatenate(obs_list, axis=0)
-                obs_tensor = torch.from_numpy(obs_arr).float().cuda() / 255.0
-                
-            from einops import rearrange
-            obs_tensor = rearrange(obs_tensor, "N H W C -> N 1 C H W")
+        if not flat_candidates:
+            return None, None, 0, 0.0, []
             
-            with torch.no_grad():
-                encoded = world_model.encode_obs(obs_tensor) # [N, 1, latent_dim]
-                encoded = encoded.squeeze(1) # [N, latent_dim]
-                
-            current_keys = self._hash_keys(encoded)
+        # Phase 2: Batched Inference
+        curr_p_list = [c[0] for c in flat_candidates]
+        env_idx_list = [c[1] for c in flat_candidates]
+        orig_p_list = [c[2] for c in flat_candidates]
+        expected_keys = [c[3] for c in flat_candidates]
+        anchor_idx_list = [c[4] for c in flat_candidates]
+        
+        if replay_buffer.store_on_gpu:
+            obs_tensor = replay_buffer.obs_buffer[curr_p_list, env_idx_list].float() / 255.0
+        else:
+            import numpy as np
+            obs_arr = replay_buffer.obs_buffer[curr_p_list, env_idx_list]
+            obs_tensor = torch.from_numpy(obs_arr).float().cuda() / 255.0
             
-            if len(current_keys) > 0:
-                hit_rate = (torch.tensor(current_keys) == anchor_key).float().mean().item()
-                total_hit_rate += hit_rate
-                num_hit_rate_samples += 1
+        from einops import rearrange
+        obs_tensor = rearrange(obs_tensor, "N H W C -> N 1 C H W")
+        
+        with torch.no_grad():
+            encoded = world_model.encode_obs(obs_tensor)
+            encoded = encoded.squeeze(1)
             
-            # Filter matches
-            matched_indices = []
-            for i_c, k_c in enumerate(current_keys):
-                if k_c == anchor_key:
-                    matched_indices.append(valid_sampled[i_c])
-                    if len(matched_indices) >= target:
-                        break
-                        
-            final_chosen_indices.extend(matched_indices)
-            
+        current_keys = self._hash_keys(encoded)
+        
+        # Phase 3: Filtering & Hit Rate
+        matched_indices = []
+        anchor_to_hits = {}
+        hits = 0
+        total_evals = len(flat_candidates)
+        
+        for k_c, expected_k, orig_p, env_idx, a_idx in zip(current_keys, expected_keys, orig_p_list, env_idx_list, anchor_idx_list):
+            if k_c == expected_k:
+                hits += 1
+                if a_idx not in anchor_to_hits:
+                    anchor_to_hits[a_idx] = 0
+                if anchor_to_hits[a_idx] < target:
+                    matched_indices.append((orig_p, env_idx))
+                    anchor_to_hits[a_idx] += 1
+                    
+        avg_hit_rate = hits / max(1, total_evals)
+        total_hit_rate = avg_hit_rate # To maintain return signature
+        
+        final_chosen_indices = matched_indices
         candidates_before_max = len(final_chosen_indices)
         if len(final_chosen_indices) > max_contexts:
             final_chosen_indices = final_chosen_indices[:max_contexts]
@@ -417,36 +423,32 @@ class RetrievalContextManager:
             end_idx = min(start_idx + chunk_size, valid_len)
             current_chunk_size = end_idx - start_idx
             
-            # Prepare observations for the chunk across all envs
-            obs_list = []
-            valid_indices = []
+            # Extract observation chunk natively using advanced slicing.
+            # Shape of chunk_obs: [current_chunk_size, num_envs, C, H, W] if stored natively.
+            # Wait, the shape of obs_buffer is usually [length, num_envs, H, W, C].
+            chunk_obs = replay_buffer.obs_buffer[start_idx:end_idx]
             
-            for p in range(start_idx, end_idx):
-                for env_idx in range(replay_buffer.num_envs):
-                    # For simplicity, we just use the current frame without context window check here
-                    # since we only need its latent for hashing. 
-                    # If it's near termination, it might be an issue, but hashing the single frame is fine.
-                    obs_list.append(replay_buffer.obs_buffer[p, env_idx:env_idx+1])
-                    valid_indices.append((p, env_idx))
-                    
-            if len(obs_list) == 0:
-                continue
-                
             if replay_buffer.store_on_gpu:
-                obs_tensor = torch.cat(obs_list, dim=0).float() / 255.0
+                obs_tensor = chunk_obs.float() / 255.0
             else:
                 import numpy as np
-                obs_arr = np.concatenate(obs_list, axis=0)
-                obs_tensor = torch.from_numpy(obs_arr).float().cuda() / 255.0
+                obs_tensor = torch.from_numpy(chunk_obs).float().cuda() / 255.0
                 
             from einops import rearrange
-            obs_tensor = rearrange(obs_tensor, "N H W C -> N 1 C H W")
+            # Flatten T and E dimensions into batch N for encode_obs
+            obs_tensor = rearrange(obs_tensor, "T E H W C -> (T E) 1 C H W")
             
             encoded = world_model.encode_obs(obs_tensor)
             encoded = encoded.squeeze(1)
-            keys = self._hash_keys(encoded)
+            keys = self._hash_keys(encoded) # Safe Python list
             
-            for (p, env_idx), key in zip(valid_indices, keys):
-                self._insert_into_bucket(p, env_idx, key)
+            # Generate valid indices using tensor operations
+            # p ranges from start_idx to end_idx, repeated for each env
+            # e_idx loops 0 to num_envs for each p
+            p_indices = torch.arange(start_idx, end_idx).view(-1, 1).expand(current_chunk_size, replay_buffer.num_envs).flatten().tolist()
+            e_indices = torch.arange(replay_buffer.num_envs).view(1, -1).expand(current_chunk_size, replay_buffer.num_envs).flatten().tolist()
+            
+            for p, e_idx, key in zip(p_indices, e_indices, keys):
+                self._insert_into_bucket(p, e_idx, key)
                 
         print(f"[Retrieval] Global Rebuild completed. Re-hashed {valid_len * replay_buffer.num_envs} frames.")
