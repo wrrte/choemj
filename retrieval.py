@@ -277,7 +277,7 @@ class RetrievalContextManager:
         Implements lazy recomputation using single frame encoding.
         """
         if not self.enabled or len(self.active_anchors) == 0:
-            return None, None, 0, 0.0, []
+            return None, None, 0, 0.0, [], 0
             
         popped_anchors = []
         for _ in range(min(max_anchors, len(self.active_anchors))):
