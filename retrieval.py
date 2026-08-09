@@ -87,6 +87,7 @@ class RetrievalContextManager:
         
         # Hashing config
         self.hash_bits = int(config.get("hash_bits", 12))
+        self.hash_sample_mode = config.get("hash_sample_mode", "probs")
         proj = torch.randn(latent_dim, self.hash_bits, dtype=torch.float32, device=device)
         self.hash_proj = proj
         bit_values = 2 ** torch.arange(self.hash_bits, dtype=torch.int64, device=device)
@@ -110,7 +111,7 @@ class RetrievalContextManager:
         keys = (bits.to(torch.int64) * self.hash_bit_values).sum(dim=-1)
         return keys.detach().cpu().tolist()
 
-    def add_batch_transitions(self, v_t, base_indexes, base_envs, max_buf_len, skip_len=8):
+    def add_batch_transitions(self, v_t, base_indexes, base_envs, max_buf_len, skip_len=8, is_warmup=False):
         if not self.enabled:
             return 0, 0
             
@@ -204,6 +205,9 @@ class RetrievalContextManager:
                         self.active_anchors.append((anchor, anchor_key))
                         num_trig += 1
             return num_trig
+            
+        if is_warmup:
+            return 0, 0
             
         num_triggered_pos = process_triggers(pos_mask, triggered_pos, sign=1)
         num_triggered_neg = process_triggers(neg_mask, triggered_neg, sign=-1)
@@ -309,7 +313,7 @@ class RetrievalContextManager:
             obs_tensor = rearrange(obs_tensor, "N H W C -> N 1 C H W")
             
             with torch.no_grad():
-                encoded = world_model.encode_obs(obs_tensor) # [N, 1, latent_dim]
+                encoded = world_model.encode_obs(obs_tensor, sample_mode=self.hash_sample_mode) # [N, 1, latent_dim]
                 encoded = encoded.squeeze(1) # [N, latent_dim]
                 
             current_keys = self._hash_keys(encoded)
@@ -431,7 +435,7 @@ class RetrievalContextManager:
             from einops import rearrange
             obs_tensor = rearrange(obs_tensor, "N H W C -> N 1 C H W")
             
-            encoded = world_model.encode_obs(obs_tensor)
+            encoded = world_model.encode_obs(obs_tensor, sample_mode=self.hash_sample_mode)
             encoded = encoded.squeeze(1)
             keys = self._hash_keys(encoded)
             
