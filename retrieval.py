@@ -111,12 +111,21 @@ class RetrievalContextManager:
         keys = (bits.to(torch.int64) * self.hash_bit_values).sum(dim=-1)
         return keys.detach().cpu().tolist()
 
-    def add_batch_transitions(self, v_t, base_indexes, base_envs, max_buf_len, skip_len=8, is_warmup=False):
+    def add_batch_transitions(self, v_t, reward, termination, gamma, base_indexes, base_envs, max_buf_len, skip_len=8, is_warmup=False):
         if not self.enabled:
             return 0, 0
             
         v_t_eval = v_t[:, skip_len:]
-        delta_v_raw = v_t_eval[:, 1:] - v_t_eval[:, :-1]
+        reward_eval = reward[:, skip_len:].squeeze(-1) if reward.dim() == 3 else reward[:, skip_len:]
+        term_eval = termination[:, skip_len:].squeeze(-1) if termination.dim() == 3 else termination[:, skip_len:]
+        
+        v_curr = v_t_eval[:, :-1]
+        v_next = v_t_eval[:, 1:]
+        r_curr = reward_eval[:, :-1]
+        d_curr = term_eval[:, :-1]
+        
+        target_v = r_curr + gamma * v_next * (1.0 - d_curr)
+        delta_v_raw = target_v - v_curr
         
         valid_mask_1d = torch.from_numpy(base_envs != -1).to(delta_v_raw.device)
         if not valid_mask_1d.any():
@@ -128,21 +137,28 @@ class RetrievalContextManager:
         pos_mask = (delta_v_raw > 0) & valid_mask_2d
         neg_mask = (delta_v_raw < 0) & valid_mask_2d
         
+        metric_pos = torch.full_like(delta_v_raw, float('-inf'))
+        metric_neg = torch.full_like(delta_v_raw, float('-inf'))
+        
         if getattr(self, "trigger_mode", "absolute") == "z_score":
             ema_mean_pos_t = torch.from_numpy(self.ema_mean_pos).to(delta_v_raw.device, dtype=torch.float32)
             ema_var_pos_t = torch.from_numpy(self.ema_var_pos).to(delta_v_raw.device, dtype=torch.float32)
             ema_mean_neg_t = torch.from_numpy(self.ema_mean_neg).to(delta_v_raw.device, dtype=torch.float32)
             ema_var_neg_t = torch.from_numpy(self.ema_var_neg).to(delta_v_raw.device, dtype=torch.float32)
             
+            b_ema_mean_pos = ema_mean_pos_t[env_indices_full].unsqueeze(1).expand_as(delta_v_raw)
+            b_ema_var_pos = ema_var_pos_t[env_indices_full].unsqueeze(1).expand_as(delta_v_raw)
+            z_scores_pos_full = torch.abs(delta_v_raw - b_ema_mean_pos) / (torch.sqrt(b_ema_var_pos) + 1e-8)
+            metric_pos[pos_mask] = z_scores_pos_full[pos_mask]
+            
+            b_ema_mean_neg = ema_mean_neg_t[env_indices_full].unsqueeze(1).expand_as(delta_v_raw)
+            b_ema_var_neg = ema_var_neg_t[env_indices_full].unsqueeze(1).expand_as(delta_v_raw)
+            z_scores_neg_full = torch.abs(delta_v_raw - b_ema_mean_neg) / (torch.sqrt(b_ema_var_neg) + 1e-8)
+            metric_neg[neg_mask] = z_scores_neg_full[neg_mask]
+            
             if pos_mask.any():
                 valid_delta_v_pos = delta_v_raw[pos_mask]
                 env_indices_pos = env_indices_full.unsqueeze(1).expand_as(delta_v_raw)[pos_mask]
-                
-                b_ema_mean_pos = ema_mean_pos_t[env_indices_pos]
-                b_ema_var_pos = ema_var_pos_t[env_indices_pos]
-                
-                z_scores_pos = torch.abs(valid_delta_v_pos - b_ema_mean_pos) / (torch.sqrt(b_ema_var_pos) + 1e-8)
-                triggered_pos = z_scores_pos >= self.z_score_threshold
                 
                 for i in range(self.num_envs):
                     env_mask = (env_indices_pos == i)
@@ -154,18 +170,10 @@ class RetrievalContextManager:
                         diff = env_mean - self.ema_mean_pos[i]
                         self.ema_mean_pos[i] += self.ema_alpha * diff
                         self.ema_var_pos[i] = (1 - self.ema_alpha) * (self.ema_var_pos[i] + self.ema_alpha * (env_var + diff**2))
-            else:
-                triggered_pos = torch.zeros(0, dtype=torch.bool, device=delta_v_raw.device)
-                
+                        
             if neg_mask.any():
                 valid_delta_v_neg = torch.abs(delta_v_raw[neg_mask])
                 env_indices_neg = env_indices_full.unsqueeze(1).expand_as(delta_v_raw)[neg_mask]
-                
-                b_ema_mean_neg = ema_mean_neg_t[env_indices_neg]
-                b_ema_var_neg = ema_var_neg_t[env_indices_neg]
-                
-                z_scores_neg = torch.abs(valid_delta_v_neg - b_ema_mean_neg) / (torch.sqrt(b_ema_var_neg) + 1e-8)
-                triggered_neg = z_scores_neg >= self.z_score_threshold
                 
                 for i in range(self.num_envs):
                     env_mask = (env_indices_neg == i)
@@ -177,22 +185,28 @@ class RetrievalContextManager:
                         diff = env_mean - self.ema_mean_neg[i]
                         self.ema_mean_neg[i] += self.ema_alpha * diff
                         self.ema_var_neg[i] = (1 - self.ema_alpha) * (self.ema_var_neg[i] + self.ema_alpha * (env_var + diff**2))
-            else:
-                triggered_neg = torch.zeros(0, dtype=torch.bool, device=delta_v_raw.device)
-                
+            
+            threshold = self.z_score_threshold
         else:
-            triggered_pos = delta_v_raw[pos_mask] >= self.threshold if pos_mask.any() else torch.zeros(0, dtype=torch.bool, device=delta_v_raw.device)
-            triggered_neg = torch.abs(delta_v_raw[neg_mask]) >= self.threshold if neg_mask.any() else torch.zeros(0, dtype=torch.bool, device=delta_v_raw.device)
+            metric_pos[pos_mask] = delta_v_raw[pos_mask]
+            metric_neg[neg_mask] = torch.abs(delta_v_raw[neg_mask])
+            threshold = self.threshold
 
-        def process_triggers(mask, triggered_subset, sign):
+        max_val_pos, max_idx_pos = metric_pos.max(dim=1)
+        max_val_neg, max_idx_neg = metric_neg.max(dim=1)
+        
+        triggered_pos_b = max_val_pos >= threshold
+        triggered_neg_b = max_val_neg >= threshold
+        
+        def process_max_triggers(triggered_b, max_idx, sign):
             num_trig = 0
-            if mask.any() and triggered_subset.any():
-                mask_indices = mask.nonzero(as_tuple=False)
-                triggered_full_indices = mask_indices[triggered_subset]
+            if triggered_b.any():
+                b_indices = triggered_b.nonzero(as_tuple=True)[0]
+                t_indices = max_idx[b_indices]
                 
-                for idx in range(triggered_full_indices.shape[0]):
-                    orig_b_idx = triggered_full_indices[idx, 0].item()
-                    t_idx = triggered_full_indices[idx, 1].item()
+                for i in range(len(b_indices)):
+                    orig_b_idx = b_indices[i].item()
+                    t_idx = t_indices[i].item()
                     
                     env_idx = base_envs[orig_b_idx]
                     base_ptr = base_indexes[orig_b_idx]
@@ -207,12 +221,13 @@ class RetrievalContextManager:
             return num_trig
             
         if is_warmup:
-            return 0, 0
+            return 0, 0, 0
             
-        num_triggered_pos = process_triggers(pos_mask, triggered_pos, sign=1)
-        num_triggered_neg = process_triggers(neg_mask, triggered_neg, sign=-1)
+        num_triggered_pos = process_max_triggers(triggered_pos_b, max_idx_pos, sign=1)
+        num_triggered_neg = process_max_triggers(triggered_neg_b, max_idx_neg, sign=-1)
+        num_triggered_both = (triggered_pos_b & triggered_neg_b).sum().item()
         
-        return num_triggered_pos, num_triggered_neg
+        return num_triggered_pos, num_triggered_neg, num_triggered_both
 
     def add_transition(self, pointer, env_idx, latent_b):
         """
@@ -272,7 +287,8 @@ class RetrievalContextManager:
         retrieved_action_list = []
         
         max_buf_len = replay_buffer.max_length // replay_buffer.num_envs
-        final_chosen_indices = []
+        
+        anchor_groups = []
         
         total_hit_rate = 0.0
         num_hit_rate_samples = 0
@@ -331,48 +347,70 @@ class RetrievalContextManager:
                     if len(matched_indices) >= target:
                         break
                         
-            final_chosen_indices.extend(matched_indices)
+            if matched_indices:
+                anchor_groups.append(matched_indices)
             
-        candidates_before_max = len(final_chosen_indices)
-        if len(final_chosen_indices) > max_contexts:
-            final_chosen_indices = final_chosen_indices[:max_contexts]
+        candidates_before_max = sum(len(g) for g in anchor_groups)
+        
+        final_anchor_groups = []
+        total_candidates = 0
+        for group in anchor_groups:
+            if total_candidates >= max_contexts:
+                break
+            space = max_contexts - total_candidates
+            to_add = group[:space]
+            total_candidates += len(to_add)
+            final_anchor_groups.append(to_add)
             
         retrieved_obs_list = []
         retrieved_action_list = []
-        retrieved_indices = []
+        retrieved_weights = []
+        valid_anchors_count = 0
         
-        for (p, env_idx) in final_chosen_indices:
-            valid = True
-            obs_chunk = []
-            action_chunk = []
-            for step in range(self.context_length - 1, -1, -1):
-                curr_p = (p - step) % max_buf_len
-                term = replay_buffer.termination_buffer[curr_p, env_idx]
-                if step > 0 and term > 0.5:
-                    valid = False
-                    break
-                    
-            if valid:
+        for group in final_anchor_groups:
+            valid_group_obs = []
+            valid_group_action = []
+            
+            for (p, env_idx) in group:
+                valid = True
+                obs_chunk = []
+                action_chunk = []
                 for step in range(self.context_length - 1, -1, -1):
                     curr_p = (p - step) % max_buf_len
-                    obs_chunk.append(replay_buffer.obs_buffer[curr_p, env_idx:env_idx+1])
-                    action_chunk.append(replay_buffer.action_buffer[curr_p, env_idx:env_idx+1])
-                    
-                if replay_buffer.store_on_gpu:
-                    obs_tensor = torch.stack(obs_chunk, dim=0)
-                    action_tensor = torch.stack(action_chunk, dim=0)
-                else:
-                    import numpy as np
-                    obs_tensor = np.stack(obs_chunk, axis=0)
-                    action_tensor = np.stack(action_chunk, axis=0)
-                    
-                retrieved_obs_list.append(obs_tensor)
-                retrieved_action_list.append(action_tensor)
-                retrieved_indices.append(p)
+                    term = replay_buffer.termination_buffer[curr_p, env_idx]
+                    if step > 0 and term > 0.5:
+                        valid = False
+                        break
+                        
+                if valid:
+                    for step in range(self.context_length - 1, -1, -1):
+                        curr_p = (p - step) % max_buf_len
+                        obs_chunk.append(replay_buffer.obs_buffer[curr_p, env_idx:env_idx+1])
+                        action_chunk.append(replay_buffer.action_buffer[curr_p, env_idx:env_idx+1])
+                        
+                    if replay_buffer.store_on_gpu:
+                        obs_tensor = torch.stack(obs_chunk, dim=0)
+                        action_tensor = torch.stack(action_chunk, dim=0)
+                    else:
+                        import numpy as np
+                        obs_tensor = np.stack(obs_chunk, axis=0)
+                        action_tensor = np.stack(action_chunk, axis=0)
+                        
+                    valid_group_obs.append(obs_tensor)
+                    valid_group_action.append(action_tensor)
+                
+            if valid_group_obs:
+                valid_anchors_count += 1
+                group_weight = 1.0 / len(valid_group_obs)
+                for _ in range(len(valid_group_obs)):
+                    retrieved_weights.append(group_weight)
+                
+                retrieved_obs_list.extend(valid_group_obs)
+                retrieved_action_list.extend(valid_group_action)
                 
         avg_hit_rate = total_hit_rate / max(1, num_hit_rate_samples)
         if len(retrieved_obs_list) == 0:
-            return None, None, candidates_before_max, avg_hit_rate, []
+            return None, None, candidates_before_max, avg_hit_rate, [], 0
             
         if replay_buffer.store_on_gpu:
             ret_obs = torch.cat(retrieved_obs_list, dim=1).float() / 255.0
@@ -388,7 +426,7 @@ class RetrievalContextManager:
             ret_action = np.concatenate(retrieved_action_list, axis=1)
             ret_action = torch.from_numpy(ret_action).cuda().transpose(0, 1) # [B, T]
             
-        return ret_obs, ret_action, candidates_before_max, avg_hit_rate, retrieved_indices
+        return ret_obs, ret_action, candidates_before_max, avg_hit_rate, retrieved_weights, valid_anchors_count
 
     @torch.no_grad()
     def rebuild_all_hash_buckets(self, replay_buffer, world_model, chunk_size=1024):
