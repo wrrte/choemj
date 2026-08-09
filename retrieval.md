@@ -1,3 +1,5 @@
+현재 다시 학습이 망가짐. 근데 생각해보면 이 기법이 뭐 gradient를 직접 조작하고 그런 건 아니라 사실 심하게 이상한 게 아니라면 원래 성적은 나와야 하는데, 이렇게 팍 무너진다는 건 뭔가 심하게 잘못한 느낌?
+
 # Retrieval-Augmented Imagination in STORM (Implementation Details)
 
 본 문서는 STORM(혹은 Drama) 아키텍처에서 강화학습 에이전트의 효율적인 상상(Imagination)과 학습을 돕기 위해 도입된 **가치 기반 검색(Value-based Retrieval)** 기법의 구현 디테일 및 핵심 철학을 정리한 문서입니다. 특히 시스템의 오버헤드를 최소화하고 검색의 질을 높이기 위해 치열하게 고민하고 수정한 핵심 설계 결정사항들을 포함하고 있습니다.
