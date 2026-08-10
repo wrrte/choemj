@@ -139,7 +139,7 @@ class RetrievalContextManager:
         if not valid_mask_1d.any():
             return 0, 0
             
-        valid_mask_2d = valid_mask_1d.unsqueeze(1)
+        valid_mask_2d = valid_mask_1d.unsqueeze(1).expand_as(delta_v_raw)
         env_indices_full = torch.from_numpy(base_envs).to(delta_v_raw.device)
         
         abs_delta_v = torch.abs(delta_v_raw)
@@ -456,6 +456,11 @@ class RetrievalContextManager:
             
             all_encoded_latents.append(encoded)
             all_valid_indices.extend(valid_indices)
+        
+        if len(all_encoded_latents) == 0:
+            return
+            
+        full_latents = torch.cat(all_encoded_latents, dim=0)
         
         # 2. PCA Projection Update
         if self.use_pca and full_latents.shape[0] > self.hash_bits:
