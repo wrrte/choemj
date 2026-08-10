@@ -1,80 +1,79 @@
 # Retrieval-Augmented Imagination in STORM (Implementation Details)
 
-본 문서는 STORM(혹은 Drama) 아키텍처에서 강화학습 에이전트의 효율적인 상상(Imagination)과 학습을 돕기 위해 도입된 **가치 기반 검색(Value-based Retrieval)** 기법의 구현 디테일 및 핵심 철학을 정리한 문서입니다. 특히 시스템의 오버헤드를 최소화하고 검색의 질을 높이기 위해 치열하게 고민하고 수정한 핵심 설계 결정사항들을 포함하고 있습니다.
+본 문서는 STORM 아키텍처에서 강화학습 에이전트의 효율적인 상상(Imagination)과 학습을 돕기 위해 도입된 **가치 기반 검색(Value-based Retrieval)** 기법의 실제 구현 기작을 코드를 바탕으로 분석하여 정리한 문서입니다. 시스템의 오버헤드를 최소화하고 검색의 질을 높이기 위해 도입된 핵심 설계들을 설명합니다.
 
 ---
 
-## 1. Core Concept: 해시 기반 Lazy Rebuild
-매 스텝마다 모든 과거 경험의 거리를 계산하여 유사한 프레임을 찾는 Global Rebuild 방식은 연산 오버헤드가 지나치게 큽니다. 이를 해결하기 위해 **LSH (Locality Sensitive Hashing)** 기반의 **Lazy Rebuild** 방식을 채택하였습니다. 
-- 환경과 상호작용하며 수집되는 `latent` 상태들은 12-bit 해시 함수를 거쳐 버킷(Bucket)에 O(1) 시간 복잡도로 저장됩니다.
-- 과거의 비슷한 상황이 필요할 때, 해당 상태의 해시 버킷에서 유사한 프레임들을 즉각적으로 끌어올려(Retrieve) 상상 배치(Imagine Batch)의 컨텍스트(Context)로 활용합니다.
+## 1. Core Concept: 해시 기반 Lazy Rebuild 및 Fast Hash Bucket
+과거 경험을 검색하기 위해 매번 전체 버퍼와 거리를 계산하는 것은 불가능에 가깝습니다. 이를 해결하기 위해 **LSH (Locality Sensitive Hashing)**와 **O(1) 연산을 지원하는 FastHashBucket**을 채택하였습니다.
+- 환경과 상호작용하며 수집되는 최신 `latent` 상태들은 12-bit 해시 함수를 거쳐 `FastHashBucket`에 O(1) 시간 복잡도로 저장됩니다. 
+- 과거의 비슷한 상황이 필요할 때, 해당 상태의 해시 버킷에서 유사한 프레임들을 즉각적으로 끌어올려 상상 배치(Imagine Batch)에 추가 컨텍스트로 활용합니다.
+- `FastHashBucket`은 리스트와 딕셔너리를 함께 사용하여 무작위 샘플링, 삽입, 삭제를 모두 O(1)에 처리할 수 있도록 최적화되어 있습니다. 최대 용량을 초과하면 랜덤하게 기존 항목을 교체합니다.
 
 ## 2. 앵커 발굴 (Anchor Triggering) 철학
 단순히 무작위로 과거 프레임을 검색하는 것이 아니라, 에이전트에게 **결정적인(Critical) 배움의 순간**을 앵커(Anchor)로 삼습니다.
-- **가치 널뛰기 평가:** 에이전트의 가치 네트워크가 예측한 $V_t - V_{t-1}$ (가치 변화량)을 관찰합니다. 가치가 급격히 치솟거나 폭락하는 순간은 에이전트가 예상치 못한 큰 보상이나 페널티를 받은 순간입니다.
-- 이 임계값을 넘은 프레임들이 '앵커'로 지정되며 대기열(Queue)에 쌓입니다. 이후 상상 단계에서 이 앵커들과 똑같은 해시 버킷에 담겨있는(즉, 유사한 상태를 가진) 과거 프레임들을 대거 소환하여 에이전트가 해당 상황에 대한 대안 미래를 집중적으로 상상하게 만듭니다.
+- **가치 변화량 기반 평가:** 에이전트의 가치 네트워크를 활용하여 $V_{target} - V_{curr}$ 즉, TD-Error의 절댓값(`abs_delta_v`)을 관찰합니다. 예상치 못한 보상이나 상태 변화가 일어난 순간이 배움의 가치가 높다고 판단합니다.
+- **Z-Score 스케일링:** 각 환경별로 가치 변화량 절댓값의 평균(`ema_mean`)과 분산(`ema_var`)을 지수 이동 평균(EMA)으로 추적합니다. 변화량이 Z-score 임계값(Threshold)을 넘는 순간, 해당 프레임이 앵커로 대기열(`active_anchors` 큐)에 추가됩니다.
+- **가장 극적인 순간 포착:** 배치(Batch) 내의 시간축에서 임계값을 넘은 여러 프레임이 있더라도 가장 큰 Z-score를 기록한 단 하나의 인덱스(`max_idx`)만 앵커로 발굴합니다.
 
 ---
 
-## 3. 핵심 설계 및 개선 사항 (Key Iterations)
+## 3. 핵심 설계 및 최적화 기작 (코드 레벨 분석)
 
-초기 구현에서 발견된 논리적 허점들과 오버헤드 문제들을 해결하기 위해 다음과 같은 핵심적인 수정이 이루어졌습니다. 이 부분들은 시스템의 완성도를 결정짓는 가장 중요한 아키텍처적 결정입니다.
+### 3.1. 환경 상호작용과 병행되는 실시간 해싱 (Online Hashing)
+- 환경 스텝이 진행될 때(`train.py`의 샘플링 파트), 현재 관측된 최신 프레임의 잠재 표현(Latent)을 해싱하여 `retrieval_manager.add_transition()`을 통해 즉시 `FastHashBucket`에 맵핑합니다.
+- 이는 매 스텝 무거운 연산을 하지 않고, 오직 단일 프레임 해싱 및 딕셔너리 삽입(O(1))만 수행하므로 매우 가볍게 동작합니다.
 
-### 3.1. 온라인 발굴에서 '배치(Batch) 기반 발굴'로의 전환
-* **이슈:** 초기에는 환경과 1스텝 상호작용을 할 때마다 즉시 가치를 평가하고 앵커를 찾으려 했습니다(Online Triggering). 하지만 이는 매 스텝 연산을 강제하여 엄청난 오버헤드를 유발하고, 무엇보다 학습되지 않은(혹은 과거의) 가치 네트워크로 평가하는 모순이 있었습니다.
-* **수정안:** 앵커 발굴 로직을 World Model이 학습되는 `train_world_model_step` 단계로 완전히 이전했습니다.
-* **사용자 강조 포인트:** EMA(지수 이동 평균)를 갱신하기 위한 시간적 기준은 "에피소드 내의 시간"이 아니라 **"모델의 학습(Update) 시점 기준의 시간"**이어야 합니다. 리플레이 버퍼에서 과거 10만 번째, 3만 번째 프레임이 시간 순서 없이 무작위 덩어리로 뽑히더라도, **현재 최신 상태의 가치 네트워크**가 이들을 일괄적으로 평가하여 Z-score와 EMA를 갱신하는 것이 통계적으로 완벽히 타당하며 연산 오버헤드도 기하급수적으로 줄어듭니다.
+### 3.2. 배치(Batch) 기반의 지연된 앵커 발굴 (Batch-based Triggering)
+- 앵커를 찾는 작업은 환경 스텝과 동시에 하지 않고, **World Model 학습 루프(`train_world_model_step`)** 안에서 일괄 처리(`add_batch_transitions`)합니다.
+- 리플레이 버퍼에서 추출된 궤적(Trajectory)들에 대해 **현재 최신 상태의 가치 네트워크**를 일괄 적용하여 평가합니다. 이는 과거의 낡은 가치 평가를 피하고 가장 정확하고 최신의 관점에서 놀라운(Surprising) 순간을 발굴하기 위함입니다.
 
-### 3.2. Warm-up 구간 제외를 통한 노이즈 억제
-* **이슈:** World Model은 `ImagineContextLength`(초기 8프레임)만큼의 입력(Obs)을 받아야만 내부 Hidden State가 제대로 수렴(Warm-up)하여 정확한 Latent를 도출할 수 있습니다. 웜업이 안 된 앞쪽 프레임들을 그대로 가치 평가에 밀어넣으면 엄청난 오차(False Positive)가 발생하여 쓰레기 앵커들이 대량 발생합니다.
-* **수정안:** 배치 내에서 차이($\Delta v$)를 계산할 때, 앞의 8프레임(`skip_len`)을 명시적으로 버림(Slice)으로써 웜업이 완료된, 신뢰할 수 있는 가치 예측값들만 Z-score 갱신 및 앵커 발굴에 사용하도록 수정했습니다.
+### 3.3. Warm-up 구간 제외를 통한 노이즈 억제
+- World Model은 초기 시퀀스(`imagine_context_length`, 기본 8프레임)를 받아야만 내부 Hidden State가 수렴하여 정상적인 예측을 할 수 있습니다.
+- 코드에서는 `v_t_eval = v_t[:, skip_len:]` 와 같이 앞의 8프레임을 명시적으로 잘라내어(Slice), 웜업이 안 된 쓰레기 가치 예측값들이 Z-score나 앵커 발굴에 혼입되는 것을 원천 차단합니다.
 
-### 3.3. 가치 상승(+)과 하락(-)의 완전한 분포 분리 ★ (매우 중요)
-* **이슈:** 강화학습에서 '아이템을 먹어 0.5점을 얻은 것(+)'과 '적에게 맞아 죽어 5점을 잃은 것(-)'은 절댓값 스케일이 전혀 다릅니다. 이들을 `abs(delta_v)` 하나로 합쳐서 평균과 분산을 추적하면, 가치 폭락에 의해 분산이 지나치게 커져버려(뻥튀기 현상), 작지만 중요한 긍정적 가치 상승은 영원히 Z-score 임계값(예: 3.5)을 넘지 못하는 문제가 발생합니다.
-* **수정안:** 
-  1. 가치가 오른 경우($\Delta v > 0$)와 떨어진 경우($\Delta v < 0$)를 마스크(Mask)로 엄격히 분리했습니다.
-  2. 양수 전용 EMA(`ema_mean_pos`, `ema_var_pos`)와 음수 전용 EMA(`ema_mean_neg`, `ema_var_neg`)를 독립적으로 유지하여 각각의 잣대로 Z-score를 평가하도록 수정했습니다.
-  3. **효과 및 확장성:** 이제 앵커가 큐에 담길 때 부호(Sign: +1 or -1) 태그가 함께 달립니다. 이를 통해 향후 **"부정적 앵커(실패 상황)가 발생했을 때, 해시 버킷에서 과거의 긍정적 결과(+)를 냈던 프레임들을 최우선으로 끌어와 강제로 상상하게 만드는"** 고도화된 타겟팅 훈련이 가능해졌습니다.
+### 3.4. 메모리/연산 병목 제어 및 타겟팅
+- 발굴된 앵커 큐(`active_anchors`)에서 매 상상(Imagine) 스텝마다 설정된 `max_anchors` 개수만큼만 꺼내어 검색을 수행합니다.
+- 선택된 앵커와 같은 해시 키를 공유하는 버킷 안에서 무작위로 `multiplier * (target - 1)` 만큼 샘플링을 진행한 후, 최신 모델로 다시 단일 프레임을 인코딩하여 원래 앵커 키와 동일한지 빠르게 재검증합니다. 
+- 이후 유효한 시퀀스들만 모아 `max_contexts` 개수 제한 내에서 최종 배치로 구성합니다.
 
-### 3.4. 메모리/연산 병목(Bottleneck) 제어 및 GPU 최적화
-* **오버헤드 방지:** 현재 서버의 GPU VRAM(96GB)이 매우 여유로운 반면 CPU-GPU 간 데이터 전송은 병목이 되기 쉽습니다. 따라서 모든 마스킹, 필터링, Z-score 계산을 순수 텐서 연산(Vectorized)으로 구성하여 GPU 내부에서만 처리되도록 구현했습니다.
-* **스팸(Spamming) 방지:** 만약 Z-score 임계값이 낮거나 극단적인 배치 조합으로 인해 한 스텝에 수백 개의 앵커가 발굴되더라도, `max_anchors`(현재 16) 설정을 통해 큐(Queue)에서 상상 단계로 꺼내어 쓰는 앵커의 최대 개수를 엄격히 제한합니다. 이를 통해 검색 오버헤드로 인한 시스템 병목을 원천적으로 차단합니다.
-
-### 3.5. Hit-Rate 모니터링 및 청크(Chunk) 기반 Global Rebuild
-* **이슈:** 시간이 지나 World Model이 고도화될수록, 과거에 뽑아두었던 Latent 기반의 해시 버킷 배치는 점점 구식이 되어버립니다(Representation Drift). 이로 인해 앵커가 뽑은 타겟 프레임들을 최신 모델로 재검증(Lazy Rebuild)해 보면, 유사도가 떨어져 버려지는 프레임 비율이 극심해집니다.
-* **수정안:** 매 스텝 1차 추출 후 최신 모델로 재인코딩했을 때 원래 해시와 여전히 일치하는 비율(`lazy_hit_rate`)을 측정합니다. 이 히트율이 설정된 임계치(예: 20%) 미만으로 떨어지면, **해시 버킷 전체를 리셋하고 리플레이 버퍼의 모든 유효 프레임을 최신 모델로 전면 재해싱하는 Global Rebuild**를 발동시킵니다.
-* **OOM 방어:** 전체 버퍼를 한 번에 World Model에 통과시키면 발생할 GPU 메모리 폭발(OOM)을 막기 위해, 1024개씩 프레임을 잘라서(Chunking) 순차적으로 재해싱하는 안전장치를 두었습니다.
+### 3.5. Hit-Rate 모니터링 및 PCA 기반 Global Rebuild
+- 시간이 지나 World Model이 고도화되면 과거의 Latent로 만들어둔 해시 버킷은 구식이 됩니다(Representation Drift).
+- `retrieve_contexts` 시점에 과거 프레임을 최신 모델로 다시 인코딩해 보며 현재 해시 키와 일치하는 비율(`lazy_hit_rate`)을 측정합니다.
+- `train.py`에서 이 히트율이 `global_rebuild_threshold` 미만으로 떨어지거나 웜업 기간이 종료되는 시점에 `rebuild_all_hash_buckets`를 발동시킵니다.
+- **PCA 최적화:** Global Rebuild 시 전체 유효 Latent를 모아 주성분 분석(PCA, `torch.pca_lowrank`)을 수행하여 해싱 투영축(`hash_proj`)을 데이터 분포에 맞게 최적화합니다. 이는 기존의 무작위 투영(Random Projection)보다 더 유의미한 해싱 퀄리티를 보장합니다.
+- **안정적 청크 단위 처리:** 사용 가능한 GPU 메모리가 넉넉하더라도 전체 버퍼를 한 번에 슬라이싱(Vectorized Slicing)하여 읽어오면, Shared Memory나 Memmap 환경에서 값이 모두 0으로 읽히는 OS 레벨의 읽기 실패 현상(Zero-read)이 발생할 수 있습니다. 이를 방지하기 위해 데이터를 안전하게 파이썬 루프로 순차 접근하되, 풍부한 VRAM에 맞춰 청크 사이즈를 크게(`chunk_size=8192`) 잡아 GPU 병렬 연산 효율을 잃지 않도록 설계했습니다. 연산 속도 확보를 위해 PCA에 사용되는 샘플 수는 `max_pca_samples`로 제한됩니다.
 
 ---
 
-## 4. 모니터링 체계 (WandB 연동)
-검색 시스템의 건전성을 실시간으로 파악하기 위해 핵심 지표들을 세분화하여 기록합니다.
-* `Retrieval/triggered_anchors_step_pos`: 현재 모델 업데이트 스텝에서 발굴된 긍정적 앵커 수
-* `Retrieval/triggered_anchors_step_neg`: 현재 모델 업데이트 스텝에서 발굴된 부정적 앵커 수
-* `Retrieval/active_anchors_queue`: 미처 처리되지 못하고 대기열에 쌓여있는 앵커의 수 (이 수치가 폭발할 경우 Z-score 임계값 상향 필요)
-* `Retrieval/candidates_before_max`: 해시 버킷에서 가져온 실제 후보 프레임의 갯수
-* `Retrieval/retrieved_contexts`: 최종적으로 필터링 및 `max_contexts` 컷오프를 거쳐 상상 배치에 삽입된 프레임 수
-* `Retrieval/lazy_rebuild_hit_rate`: Lazy Rebuild 단계에서 최신 모델로 재해싱 시 타겟 프레임이 여전히 동일 버킷에 속하는 비율 (높을수록 좋음)
-* `Retrieval/global_rebuild_triggered`: 해시 버킷 전면 재정렬(Global Rebuild)이 발동된 시점을 나타내는 플래그 (1.0 = 발동)
+## 4. 모니터링 체계 (WandB 로깅)
+학습 코드(`train.py`)에서는 검색 시스템의 건전성을 위해 다음과 같은 핵심 지표들을 추적하고 있습니다.
+* `Retrieval/triggered_anchors_step`: 모델 업데이트 스텝에서 새롭게 발굴된 앵커 수
+* `Retrieval/active_anchors_queue`: 대기열(Queue)에 쌓여있는 미처리 앵커의 수
+* `Retrieval/candidates_before_max`: 앵커들이 버킷에서 1차적으로 건져 올린 유효한 후보 프레임들의 개수
+* `Retrieval/retrieved_contexts`: 최종적으로 필터링되어 상상 배치에 삽입된 프레임 수
+* `Retrieval/lazy_rebuild_hit_rate`: Lazy Rebuild 단계에서 최신 모델로 재검증 시 원래 키와 일치하는 비율
+* `Retrieval/global_rebuild_triggered`: 해시 버킷 전면 리셋(Global Rebuild)이 발동된 플래그 (1.0 = 발동)
+* `Retrieval/avg_bucket_size` / `num_active_buckets` / `bucket_size_hist`: 현재 운용 중인 해시 버킷들의 크기 및 분포 현황
 
 ---
 
-## 5. 핵심 설정 파라미터 (STORM.yaml)
-본 검색 아키텍처의 동작 방식과 민감도는 `STORM.yaml`의 `JointTrainAgent.Retrieval` 하위 항목들을 통해 세밀하게 조정할 수 있습니다.
+## 5. 핵심 설정 파라미터 (STORM.yaml 기준)
+검색 아키텍처의 동작은 `JointTrainAgent.Retrieval` 하위 설정들로 세밀하게 조정됩니다.
 
-* **`trigger_mode`** (`"z_score"` or `"absolute"`): 가치 변화를 평가하는 방식입니다. 가변적인 보상 스케일에 적응하기 위해 `z_score` 방식을 권장합니다.
-* **`z_score_threshold`** (예: `3.5`): 가치 변화($\Delta v$)가 EMA 평균으로부터 몇 표준편차만큼 벗어났을 때 앵커로 취급할지 결정합니다. 낮을수록 앵커가 폭발적으로 쌓이며, 높을수록 극단적으로 이례적인 상황만 발굴합니다.
-* **`ema_alpha`** (예: `0.01`): Z-score 계산을 위한 평균 및 분산 업데이트의 관성(Momentum)입니다. 현재 모델의 학습 상태에 얼마나 빨리 적응할지 결정합니다.
-* **`anchor_offset`** (예: `-2`): 발굴된 앵커 기준점으로부터 실제 환경 인덱스를 얼마나 시프트(Shift)할지 결정합니다. STORM의 Prior 네트워크 특성상 행동 및 가치 도출 시점인 $t-2$를 조준하기 위해 사용됩니다.
-* **`hash_bits`** (예: `12`): LSH를 위해 Latent 상태를 몇 비트로 해싱할지 결정합니다. 비트가 높을수록 버킷이 잘게 쪼개져 매우 유사한 상태들만 같은 버킷에 담기고, 낮을수록 범용적인 상태들이 섞여 들어옵니다.
-* **`max_anchors`** (예: `16`): 한 번의 상상(Imagine) 스텝에서 대기열(Queue)로부터 꺼내어 실제 해시 검색에 사용할 앵커의 '최대 개수'입니다. 앵커 스팸(Spamming)으로 인한 시스템 병목을 막는 일차적 방어선입니다.
-* **`target`** (예: `16`): 하나의 앵커가 주어졌을 때, 같은 해시 버킷에서 끌어올리고자 하는 '목표 유사 프레임 개수'입니다.
-* **`multiplier`** (예: `8`): 해시 버킷에서 프레임을 무작위로 추출할 때, `target`을 채우기 위해 넉넉하게 뽑아볼 후보군의 배수입니다. (`x * (y-1)` 개수만큼 1차 추출)
-* **`max_contexts`** (예: `256`): 여러 개의 앵커가 발굴하여 모아온 총 프레임들의 개수가 지나치게 많을 경우 상상 배치의 메모리 한계를 넘지 않도록 자르는(Truncate) 최종 상한선입니다.
-* **`global_rebuild_enable`** (예: `True`): 히트율 기반의 해시 버킷 자동 리셋 기능(Global Rebuild)을 켤지 결정합니다.
-* **`global_rebuild_threshold`** (예: `0.2`): Lazy Rebuild 히트율이 이 수치 미만으로 떨어질 때 Global Rebuild를 발동시킵니다.
-* **`global_rebuild_cooldown`** (예: `2000`): 한 번 Global Rebuild가 발동된 후 최소 몇 스텝 동안은 다시 발동하지 않고 대기할지 결정합니다.
+* **`trigger_mode`** (`"z_score"` or `"absolute"`): 가치 변화를 평가하는 방식입니다.
+* **`z_score_threshold`**: 절댓값 가치 변화(`abs_delta_v`)가 EMA 평균으로부터 몇 표준편차 벗어났을 때 앵커로 지정할지 결정합니다.
+* **`ema_alpha`**: Z-score 계산을 위한 평균 및 분산 업데이트의 Momentum 계수입니다.
+* **`anchor_offset`**: 발굴된 앵커 시점으로부터 실제 환경 인덱스를 시프트할 양입니다.
+* **`hash_bits`**: LSH에서 Latent를 몇 비트로 해싱할지 결정합니다.
+* **`use_pca`** / **`max_pca_samples`**: Global Rebuild 시 PCA 기반의 해시 투영축 최적화를 수행할지 여부와, PCA 연산에 사용할 최대 샘플 수를 지정합니다.
+* **`max_anchors`**: 매 스텝 꺼내어 검색을 시도할 최대 앵커의 개수입니다.
+* **`target`**: 앵커 하나당 버킷에서 구성하고자 단 최종 목표 타겟 프레임 수입니다.
+* **`multiplier`**: 타겟을 찾기 위해 버킷에서 1차로 무작위 샘플링할 배수입니다.
+* **`max_contexts`**: 상상 배치로 들어갈 최종 궤적들의 최대 허용 상한선입니다.
+* **`global_rebuild_enable`** / **`global_rebuild_threshold`** / **`global_rebuild_cooldown`**: Hit-rate 기반의 Global Rebuild 발동 여부, 임계값, 쿨다운 스텝 설정입니다.
 
 ---
 
-## 6. world model, actor critic을 학습할 때 사용하는 기존의 샘플링 비율 로직을 최대한 건드리지 않아야 함.
+## 6. 결론
+이러한 구조적 분리(Online Hashing & Batch-based Triggering)와 지연 평가(Lazy Hit-rate), 텐서 및 해시 버킷 레벨의 O(1) 최적화를 통해, **World Model 및 Actor-Critic 학습 프로세스의 기존 샘플링 비율과 동작을 전혀 방해하지 않고** 매우 적은 오버헤드로 극적인 경험들을 상상 배치에 투입할 수 있습니다.

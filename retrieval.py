@@ -86,8 +86,13 @@ class RetrievalContextManager:
         # Hashing config
         self.hash_bits = int(config.get("hash_bits", 12))
         self.hash_sample_mode = config.get("hash_sample_mode", "probs")
+        self.use_pca = config.get("use_pca", True)
+        self.max_pca_samples = int(config.get("max_pca_samples", 10000))
+        
         proj = torch.randn(latent_dim, self.hash_bits, dtype=torch.float32, device=device)
         self.hash_proj = proj
+        self.hash_mean = None
+        
         bit_values = 2 ** torch.arange(self.hash_bits, dtype=torch.int64, device=device)
         self.hash_bit_values = bit_values
         
@@ -104,7 +109,12 @@ class RetrievalContextManager:
     def _hash_keys(self, latent):
         if latent.numel() == 0:
             return []
-        scores = latent.float() @ self.hash_proj.float()
+            
+        latent_f = latent.float()
+        if self.hash_mean is not None:
+            latent_f = latent_f - self.hash_mean.float()
+            
+        scores = latent_f @ self.hash_proj.float()
         bits = scores > 0
         keys = (bits.to(torch.int64) * self.hash_bit_values).sum(dim=-1)
         return keys.detach().cpu().tolist()
@@ -396,7 +406,7 @@ class RetrievalContextManager:
         return ret_obs, ret_action, candidates_before_max, avg_hit_rate, retrieved_weights, valid_anchors_count
 
     @torch.no_grad()
-    def rebuild_all_hash_buckets(self, replay_buffer, world_model, chunk_size=1024):
+    def rebuild_all_hash_buckets(self, replay_buffer, world_model, chunk_size=8192):
         """
         Clears all hash buckets and re-hashes all valid transitions in the replay buffer 
         using the latest world model to fix representation drift (Global Rebuild).
@@ -410,20 +420,21 @@ class RetrievalContextManager:
         max_buf_len = replay_buffer.max_length // replay_buffer.num_envs
         valid_len = min(replay_buffer.length, max_buf_len)
         
-        # We process in chunks to prevent GPU OOM
+        all_encoded_latents = []
+        all_valid_indices = []
+        
+        # 1. Collect all valid latents in chunks. 
+        # Although GPU VRAM is large, we must avoid massive vectorized slicing (e.g. buffer[:valid_len]) 
+        # on the Replay Buffer due to shared-memory/memmap silent read failures (yielding all zeros).
         for start_idx in range(0, valid_len, chunk_size):
             end_idx = min(start_idx + chunk_size, valid_len)
-            current_chunk_size = end_idx - start_idx
             
-            # Prepare observations for the chunk across all envs
             obs_list = []
             valid_indices = []
             
+            # Safe iterative read to prevent memory-mapped array zero-read issues
             for p in range(start_idx, end_idx):
                 for env_idx in range(replay_buffer.num_envs):
-                    # For simplicity, we just use the current frame without context window check here
-                    # since we only need its latent for hashing. 
-                    # If it's near termination, it might be an issue, but hashing the single frame is fine.
                     obs_list.append(replay_buffer.obs_buffer[p, env_idx:env_idx+1])
                     valid_indices.append((p, env_idx))
                     
@@ -442,9 +453,32 @@ class RetrievalContextManager:
             
             encoded = world_model.encode_obs(obs_tensor, sample_mode=self.hash_sample_mode)
             encoded = encoded.squeeze(1)
-            keys = self._hash_keys(encoded)
             
-            for (p, env_idx), key in zip(valid_indices, keys):
-                self._insert_into_bucket(p, env_idx, key)
+            all_encoded_latents.append(encoded)
+            all_valid_indices.extend(valid_indices)
+        
+        # 2. PCA Projection Update
+        if self.use_pca and full_latents.shape[0] > self.hash_bits:
+            pca_input = full_latents
+            if pca_input.shape[0] > self.max_pca_samples:
+                indices = torch.randperm(pca_input.shape[0], device=pca_input.device)[:self.max_pca_samples]
+                pca_input = pca_input[indices]
                 
-        print(f"[Retrieval] Global Rebuild completed. Re-hashed {valid_len * replay_buffer.num_envs} frames.")
+            mean_latent = pca_input.mean(dim=0, keepdim=True)
+            centered_input = pca_input - mean_latent
+            
+            # Perform PCA (q=hash_bits)
+            U, S, V = torch.pca_lowrank(centered_input, q=self.hash_bits, center=False)
+            
+            if not torch.isnan(V).any():
+                self.hash_proj = V
+                self.hash_mean = mean_latent
+                
+        # 3. Bulk Hashing and Insertion
+        keys = self._hash_keys(full_latents)
+        
+        for (p, env_idx), key in zip(all_valid_indices, keys):
+            self._insert_into_bucket(p, env_idx, key)
+                
+        print(f"[Retrieval] Global Rebuild completed. Re-hashed {valid_len * replay_buffer.num_envs} frames (PCA: {self.use_pca}).")
+
