@@ -80,10 +80,8 @@ class RetrievalContextManager:
         self.z_score_threshold = float(config.get("z_score_threshold", 2.0))
         self.ema_alpha = float(config.get("ema_alpha", 0.01))
         
-        self.ema_mean_pos = np.zeros(num_envs)
-        self.ema_var_pos = np.ones(num_envs)
-        self.ema_mean_neg = np.zeros(num_envs)
-        self.ema_var_neg = np.ones(num_envs)
+        self.ema_mean = np.zeros(num_envs)
+        self.ema_var = np.ones(num_envs)
         
         # Hashing config
         self.hash_bits = int(config.get("hash_bits", 12))
@@ -134,71 +132,44 @@ class RetrievalContextManager:
         valid_mask_2d = valid_mask_1d.unsqueeze(1)
         env_indices_full = torch.from_numpy(base_envs).to(delta_v_raw.device)
         
-        pos_mask = (delta_v_raw > 0) & valid_mask_2d
-        neg_mask = (delta_v_raw < 0) & valid_mask_2d
+        abs_delta_v = torch.abs(delta_v_raw)
         
-        metric_pos = torch.full_like(delta_v_raw, float('-inf'))
-        metric_neg = torch.full_like(delta_v_raw, float('-inf'))
+        metric = torch.full_like(delta_v_raw, float('-inf'))
         
         if getattr(self, "trigger_mode", "absolute") == "z_score":
-            ema_mean_pos_t = torch.from_numpy(self.ema_mean_pos).to(delta_v_raw.device, dtype=torch.float32)
-            ema_var_pos_t = torch.from_numpy(self.ema_var_pos).to(delta_v_raw.device, dtype=torch.float32)
-            ema_mean_neg_t = torch.from_numpy(self.ema_mean_neg).to(delta_v_raw.device, dtype=torch.float32)
-            ema_var_neg_t = torch.from_numpy(self.ema_var_neg).to(delta_v_raw.device, dtype=torch.float32)
+            ema_mean_t = torch.from_numpy(self.ema_mean).to(delta_v_raw.device, dtype=torch.float32)
+            ema_var_t = torch.from_numpy(self.ema_var).to(delta_v_raw.device, dtype=torch.float32)
             
-            b_ema_mean_pos = ema_mean_pos_t[env_indices_full].unsqueeze(1).expand_as(delta_v_raw)
-            b_ema_var_pos = ema_var_pos_t[env_indices_full].unsqueeze(1).expand_as(delta_v_raw)
-            z_scores_pos_full = torch.abs(delta_v_raw - b_ema_mean_pos) / (torch.sqrt(b_ema_var_pos) + 1e-8)
-            metric_pos[pos_mask] = z_scores_pos_full[pos_mask]
+            b_ema_mean = ema_mean_t[env_indices_full].unsqueeze(1).expand_as(delta_v_raw)
+            b_ema_var = ema_var_t[env_indices_full].unsqueeze(1).expand_as(delta_v_raw)
             
-            b_ema_mean_neg = ema_mean_neg_t[env_indices_full].unsqueeze(1).expand_as(delta_v_raw)
-            b_ema_var_neg = ema_var_neg_t[env_indices_full].unsqueeze(1).expand_as(delta_v_raw)
-            z_scores_neg_full = torch.abs(delta_v_raw - b_ema_mean_neg) / (torch.sqrt(b_ema_var_neg) + 1e-8)
-            metric_neg[neg_mask] = z_scores_neg_full[neg_mask]
+            z_scores_full = torch.abs(abs_delta_v - b_ema_mean) / (torch.sqrt(b_ema_var) + 1e-8)
+            metric[valid_mask_2d] = z_scores_full[valid_mask_2d]
             
-            if pos_mask.any():
-                valid_delta_v_pos = delta_v_raw[pos_mask]
-                env_indices_pos = env_indices_full.unsqueeze(1).expand_as(delta_v_raw)[pos_mask]
+            if valid_mask_2d.any():
+                valid_abs_delta_v = abs_delta_v[valid_mask_2d]
+                env_indices_valid = env_indices_full.unsqueeze(1).expand_as(delta_v_raw)[valid_mask_2d]
                 
                 for i in range(self.num_envs):
-                    env_mask = (env_indices_pos == i)
+                    env_mask = (env_indices_valid == i)
                     if env_mask.any():
-                        env_delta_v = valid_delta_v_pos[env_mask]
+                        env_delta_v = valid_abs_delta_v[env_mask]
                         env_mean = env_delta_v.mean().item()
                         env_var = env_delta_v.var(unbiased=False).item() if env_delta_v.numel() > 1 else 0.0
                         
-                        diff = env_mean - self.ema_mean_pos[i]
-                        self.ema_mean_pos[i] += self.ema_alpha * diff
-                        self.ema_var_pos[i] = (1 - self.ema_alpha) * (self.ema_var_pos[i] + self.ema_alpha * (env_var + diff**2))
-                        
-            if neg_mask.any():
-                valid_delta_v_neg = torch.abs(delta_v_raw[neg_mask])
-                env_indices_neg = env_indices_full.unsqueeze(1).expand_as(delta_v_raw)[neg_mask]
-                
-                for i in range(self.num_envs):
-                    env_mask = (env_indices_neg == i)
-                    if env_mask.any():
-                        env_delta_v = valid_delta_v_neg[env_mask]
-                        env_mean = env_delta_v.mean().item()
-                        env_var = env_delta_v.var(unbiased=False).item() if env_delta_v.numel() > 1 else 0.0
-                        
-                        diff = env_mean - self.ema_mean_neg[i]
-                        self.ema_mean_neg[i] += self.ema_alpha * diff
-                        self.ema_var_neg[i] = (1 - self.ema_alpha) * (self.ema_var_neg[i] + self.ema_alpha * (env_var + diff**2))
+                        diff = env_mean - self.ema_mean[i]
+                        self.ema_mean[i] += self.ema_alpha * diff
+                        self.ema_var[i] = (1 - self.ema_alpha) * (self.ema_var[i] + self.ema_alpha * (env_var + diff**2))
             
             threshold = self.z_score_threshold
         else:
-            metric_pos[pos_mask] = delta_v_raw[pos_mask]
-            metric_neg[neg_mask] = torch.abs(delta_v_raw[neg_mask])
+            metric[valid_mask_2d] = abs_delta_v[valid_mask_2d]
             threshold = self.threshold
 
-        max_val_pos, max_idx_pos = metric_pos.max(dim=1)
-        max_val_neg, max_idx_neg = metric_neg.max(dim=1)
+        max_val, max_idx = metric.max(dim=1)
+        triggered_b = max_val >= threshold
         
-        triggered_pos_b = max_val_pos >= threshold
-        triggered_neg_b = max_val_neg >= threshold
-        
-        def process_max_triggers(triggered_b, max_idx, sign):
+        def process_max_triggers(triggered_b, max_idx):
             num_trig = 0
             if triggered_b.any():
                 b_indices = triggered_b.nonzero(as_tuple=True)[0]
@@ -215,19 +186,17 @@ class RetrievalContextManager:
                     
                     anchor_key = self.index_to_bucket.get((anchor_ptr, env_idx), -1)
                     if anchor_key != -1:
-                        anchor = (anchor_ptr, env_idx, sign)
+                        anchor = (anchor_ptr, env_idx)
                         self.active_anchors.append((anchor, anchor_key))
                         num_trig += 1
             return num_trig
             
         if is_warmup:
-            return 0, 0, 0
+            return 0
             
-        num_triggered_pos = process_max_triggers(triggered_pos_b, max_idx_pos, sign=1)
-        num_triggered_neg = process_max_triggers(triggered_neg_b, max_idx_neg, sign=-1)
-        num_triggered_both = (triggered_pos_b & triggered_neg_b).sum().item()
+        num_triggered = process_max_triggers(triggered_b, max_idx)
         
-        return num_triggered_pos, num_triggered_neg, num_triggered_both
+        return num_triggered
 
     def add_transition(self, pointer, env_idx, latent_b):
         """
@@ -294,8 +263,8 @@ class RetrievalContextManager:
         num_hit_rate_samples = 0
         
         for anchor_tuple, anchor_key in popped_anchors:
-            # anchor_tuple is (anchor_ptr, env_idx, sign)
-            anchor_ptr, anchor_env_idx, sign = anchor_tuple
+            # anchor_tuple is (anchor_ptr, env_idx)
+            anchor_ptr, anchor_env_idx = anchor_tuple
             queue = self.hash_memory.get(anchor_key)
             if not queue:
                 continue
