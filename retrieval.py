@@ -301,8 +301,6 @@ class RetrievalContextManager:
                 continue
                 
             sampled_indices = queue.sample(k=multiplier*(target-1), exclude=(anchor_ptr, anchor_env_idx))
-            if not sampled_indices:
-                continue
                 
             obs_list = []
             valid_sampled = []
@@ -315,32 +313,32 @@ class RetrievalContextManager:
                 obs_list.append(replay_buffer.obs_buffer[curr_p, env_idx:env_idx+1])
                 valid_sampled.append((p, env_idx))
                 
-            if not obs_list:
-                continue
+            if obs_list:
+                if replay_buffer.store_on_gpu:
+                    obs_tensor = torch.cat(obs_list, dim=0).float() / 255.0
+                else:
+                    import numpy as np
+                    obs_arr = np.concatenate(obs_list, axis=0)
+                    obs_tensor = torch.from_numpy(obs_arr).float().cuda() / 255.0
+                    
+                from einops import rearrange
+                obs_tensor = rearrange(obs_tensor, "N H W C -> N 1 C H W")
                 
-            if replay_buffer.store_on_gpu:
-                obs_tensor = torch.cat(obs_list, dim=0).float() / 255.0
+                with torch.no_grad():
+                    encoded = world_model.encode_obs(obs_tensor, sample_mode=self.hash_sample_mode) # [N, 1, latent_dim]
+                    encoded = encoded.squeeze(1) # [N, latent_dim]
+                    
+                current_keys = self._hash_keys(encoded)
+                
+                if len(current_keys) > 0:
+                    hit_rate = (torch.tensor(current_keys) == anchor_key).float().mean().item()
+                    total_hit_rate += hit_rate
+                    num_hit_rate_samples += 1
             else:
-                import numpy as np
-                obs_arr = np.concatenate(obs_list, axis=0)
-                obs_tensor = torch.from_numpy(obs_arr).float().cuda() / 255.0
-                
-            from einops import rearrange
-            obs_tensor = rearrange(obs_tensor, "N H W C -> N 1 C H W")
-            
-            with torch.no_grad():
-                encoded = world_model.encode_obs(obs_tensor, sample_mode=self.hash_sample_mode) # [N, 1, latent_dim]
-                encoded = encoded.squeeze(1) # [N, latent_dim]
-                
-            current_keys = self._hash_keys(encoded)
-            
-            if len(current_keys) > 0:
-                hit_rate = (torch.tensor(current_keys) == anchor_key).float().mean().item()
-                total_hit_rate += hit_rate
-                num_hit_rate_samples += 1
+                current_keys = []
             
             # Filter matches
-            matched_indices = []
+            matched_indices = [(anchor_ptr, anchor_env_idx)] # 앵커를 항상 첫 번째 타겟으로 추가
             for i_c, k_c in enumerate(current_keys):
                 if k_c == anchor_key:
                     matched_indices.append(valid_sampled[i_c])
