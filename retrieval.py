@@ -153,7 +153,7 @@ class RetrievalContextManager:
             b_ema_mean = ema_mean_t[env_indices_full].unsqueeze(1).expand_as(delta_v_raw)
             b_ema_var = ema_var_t[env_indices_full].unsqueeze(1).expand_as(delta_v_raw)
             
-            z_scores_full = torch.abs(abs_delta_v - b_ema_mean) / (torch.sqrt(b_ema_var) + 1e-8)
+            z_scores_full = (abs_delta_v - b_ema_mean) / (torch.sqrt(b_ema_var) + 1e-8)
             metric[valid_mask_2d] = z_scores_full[valid_mask_2d]
             
             if valid_mask_2d.any():
