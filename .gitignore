@@ -12,3 +12,4 @@ wandb_logs/
 .gemini/
 .npm/
 .bash_history
+.netrc
