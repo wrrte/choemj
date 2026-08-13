@@ -83,6 +83,9 @@ class RetrievalContextManager:
         self.ema_mean = np.zeros(num_envs)
         self.ema_var = np.ones(num_envs)
         
+        self.ema_vd_mean = np.zeros(num_envs)
+        self.ema_vd_var = np.ones(num_envs)
+        
         # Hashing config
         self.hash_bits = int(config.get("hash_bits", 12))
         self.hash_sample_mode = config.get("hash_sample_mode", "probs")
@@ -132,6 +135,9 @@ class RetrievalContextManager:
         r_curr = reward_eval[:, :-1]
         d_curr = term_eval[:, :-1]
         
+        v_prev = v_t[:, skip_len-1:-2]
+        value_diff = v_curr - v_prev
+        
         target_v = r_curr + gamma * v_next * (1.0 - d_curr)
         delta_v_raw = target_v - v_curr
         
@@ -153,11 +159,22 @@ class RetrievalContextManager:
             b_ema_mean = ema_mean_t[env_indices_full].unsqueeze(1).expand_as(delta_v_raw)
             b_ema_var = ema_var_t[env_indices_full].unsqueeze(1).expand_as(delta_v_raw)
             
-            z_scores_full = (abs_delta_v - b_ema_mean) / (torch.sqrt(b_ema_var) + 1e-8)
-            metric[valid_mask_2d] = z_scores_full[valid_mask_2d]
+            z_td_full = (abs_delta_v - b_ema_mean) / (torch.sqrt(b_ema_var) + 1e-8)
+            
+            ema_vd_mean_t = torch.from_numpy(self.ema_vd_mean).to(value_diff.device, dtype=torch.float32)
+            ema_vd_var_t = torch.from_numpy(self.ema_vd_var).to(value_diff.device, dtype=torch.float32)
+            
+            b_ema_vd_mean = ema_vd_mean_t[env_indices_full].unsqueeze(1).expand_as(value_diff)
+            b_ema_vd_var = ema_vd_var_t[env_indices_full].unsqueeze(1).expand_as(value_diff)
+            
+            z_vd_full = (value_diff - b_ema_vd_mean) / (torch.sqrt(b_ema_vd_var) + 1e-8)
+            
+            combined_metric = torch.relu(z_td_full) * torch.nn.functional.softplus(z_vd_full)
+            metric[valid_mask_2d] = combined_metric[valid_mask_2d]
             
             if valid_mask_2d.any():
                 valid_abs_delta_v = abs_delta_v[valid_mask_2d]
+                valid_value_diff = value_diff[valid_mask_2d]
                 env_indices_valid = env_indices_full.unsqueeze(1).expand_as(delta_v_raw)[valid_mask_2d]
                 
                 for i in range(self.num_envs):
@@ -170,6 +187,14 @@ class RetrievalContextManager:
                         diff = env_mean - self.ema_mean[i]
                         self.ema_mean[i] += self.ema_alpha * diff
                         self.ema_var[i] = (1 - self.ema_alpha) * (self.ema_var[i] + self.ema_alpha * (env_var + diff**2))
+                        
+                        env_vd = valid_value_diff[env_mask]
+                        env_vd_mean = env_vd.mean().item()
+                        env_vd_var = env_vd.var(unbiased=False).item() if env_vd.numel() > 1 else 0.0
+                        
+                        diff_vd = env_vd_mean - self.ema_vd_mean[i]
+                        self.ema_vd_mean[i] += self.ema_alpha * diff_vd
+                        self.ema_vd_var[i] = (1 - self.ema_alpha) * (self.ema_vd_var[i] + self.ema_alpha * (env_vd_var + diff_vd**2))
             
             threshold = self.z_score_threshold
         else:
