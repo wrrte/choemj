@@ -7,3 +7,10 @@ graduate_research/
 STORM/
 TWISTER/
 wandb_logs/
+.bash_history
+.netrc
+.antigravity-ide-server/
+.cache/
+.gemini/
+.npm/
+.nv/
