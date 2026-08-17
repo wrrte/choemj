@@ -1,9 +1,9 @@
-% 월드 모델이 병목이 아닌 근거에 필요한 실험이 뭔지 알아내기. Cos sim이 1이 아닌 걸로 충분? 아니라면 blurr는 쉽게 충분히 구분됳 수 있음을 수학적으로 증명하는게 필요? 애초에 논문 자체를 분석 비중을 절반 정도는 해야할듯. 드라마 평상세, 드리머 접근시 물고기가 흐려졌다가 다시 선명해진느 것으로 물고기 정보는 제대로 보존되어 있으나 디코더가 뭄제임을 알 수 있음. 가벼운 MLP로 하단의 잠수부 개수와 화면 상에 잠수부가 있는지, 위치는 어딘지를 예측하도록 해볼까? 절대 월드 모델에는 gradient가 가지 않도록 말이야. 하단 잠수부 개수는 이미 대충 알아서 쉬운데, 화면 상의 잠수부 개수와 위치도 환경이 ram에 담아주는지 확인해봐야 함.
+% 월드 모델이 병목이 아닌 근거에 필요한 실험이 뭔지 알아내기. Cos sim이 1이 아닌 걸로 충분? 아니라면 blurr는 쉽게 충분히 구분됳 수 있음을 수학적으로 증명하는게 필요? 애초에 논문 자체를 분석 비중을 절반 정도는 해야할듯. 드라마 평상세, 드리머 접근시 물고기가 흐려졌다가 다시 선명해진느 것으로 물고기 정보는 제대로 보존되어 있으나 디코더가 뭄제임을 알 수 있음. 가벼운 MLP로 하단의 잠수부 개수와 화면 상에 잠수부가 있는지, 위치는 어딘지를 예측하도록 해볼까? 절대 월드 모델에는 gradient가 가지 않도록 말이야. 하단 잠수부 개수는 이미 대충 알아서 쉬운데, 화면 상의 잠수부 개수와 위치도 환경이 ram에 담아주는지 확인해봐야 함. Blurr가 안 됨을 증명하기 위해 잠수부 위치는 똑같고 다른 부분은 랜점 노이즈 라무렇게나 줘봐서 확률이 괜찮은 수준으로 유지되는지 실험. 이런걸 몇 개의 게임에 대해 해야 할까? 시드가 달라져도 성능 천차만별인 것도 액터 크리틱의 문제로 볼 수 있을 듯. Retrieval 시간복잡도를 코드 기준으로 면밀히 분석. 저당, 탐색, 적용 등. '근처 3?개 에피소드 중 최댓값'의 증가 속도가 급격히 폭증하는 스텝부터 retrieval을 활성화하도록 하거나, 아니면 그냥 20000스텝으로 고정. 
 
 
 \documentclass{article} % For LaTeX2e
 \usepackage{iclr2027_conference,times}
-
+\usepackage{kotex} % 한국어 출력을 위해 추가
 % Optional math commands from https://github.com/goodfeli/dlbook_notation.
 \input{math_commands.tex}
 
@@ -29,7 +29,7 @@ Ji Q. Ren \& Yevgeny LeNet \\
 Department of Computational Neuroscience \\
 University of the Witwatersrand \\
 Joburg, South Africa \\
-\texttt{\{robot,net\}@wits.ac.za} \\
+\texttt{\{robot,net\}@wits.za} \\
 \AND
 Coauthor \\
 Affiliation \\
@@ -55,403 +55,218 @@ Address \\
 \maketitle
 
 \begin{abstract}
-The abstract paragraph should be indented 1/2~inch (3~picas) on both left and
-right-hand margins. Use 10~point type, with a vertical spacing of 11~points.
-The word \textsc{Abstract} must be centered, in small caps, and in point size 12. Two
-line spaces precede the abstract. The abstract must be limited to one
-paragraph.
+\textbf{[작성 가이드: 초록 작성]}
+
+1. 배경: 최근 강화학습에서 세계 모델(World Model) 및 Diffusion 기반 기법들이 널리 쓰이나, 연산량이 너무 크다는 문제 제기.
+2. 핵심 발견 (가장 중요): 기존 모델들의 성능이 떨어지는 것은 'Reconstruction(복원)이 안 되어서(Representation이 부족해서)'가 아님을 증명. 사실 인코더는 이미 충분한 정보를 담고 있다.
+3. 진짜 문제점 지적: 여러 시드(Seed)에 따른 극심한 성능 편차 등은 병목 현상이 Representation이 아니라 Actor-Critic의 최적화 과정에 있음을 시사함.
+4. 제안 방법: 무거운 Diffusion 대신, Actor-Critic의 최적화를 돕는 효율적인 Episodic Retrieval(경험 검색) 기법을 제안.
+5. 결과: 기존 SOTA와 동등 이상의 성능을 극도로 적은 연산량(높은 FPS)으로 달성했으며, 시드 간 편차도 크게 줄임.
 \end{abstract}
 
-\section{Submission of conference papers to ICLR 2027}
+\section{Introduction}
+\textbf{[작성 가이드: 서론 작성]}
+
+\begin{itemize}
+\item 최근 강화학습에서 Diffusion 모델의 유행과 그로 인한 막대한 비용(Cost/Latency) 지적.
+\end{itemize}
+\begin{itemize}
+\item "정말 이 무거운 연산이 필수적인가? 병목은 다른 곳에 있는 것이 아닐까?"라는 의문 제기.
+\end{itemize}
+\begin{itemize}
+\item 시드별 성능 편차가 크다는 관측 결과를 언급하며, 진짜 문제는 'Actor-Critic의 불안정한 학습'에 있음을 주장.
+\end{itemize}
+\begin{itemize}
+\item 우리의 기여 요약: 1) Representation의 충분성 증명, 2) Actor-Critic 병목 지적, 3) 이를 해결하기 위한 Episodic Retrieval 기법 제안 및 효율성 입증.
+\end{itemize}
+
+\section{Related Work}
+\textbf{[작성 가이드: 관련 연구 작성]}
+
+\begin{itemize}
+\item RL에서의 Representation Learning
+\end{itemize}
+\begin{itemize}
+\item Diffusion Models for Reinforcement Learning (과도한 연산량 지적)
+\end{itemize}
+\begin{itemize}
+\item Episodic Control / Retrieval-augmented RL (우리의 방법론과 유사한 이전 연구들과의 차별점 명시)
+\end{itemize}
+
+\section{Are Heavy Representations Necessary?: Decoding the Sufficiency of Encoders}
+\textbf{[작성 가이드: 기존 인코더가 이미 충분한 정보를 담고 있음을 증명하는 분석 섹션]}
+
+\subsection{The Myth of Reconstruction Quality}
+\begin{itemize}
+\item 흔히 범하는 오류: "디코더 이미지가 흐릿하면 정보가 없다"는 착각.
+\item \textbf{정성적 증거 (Qualitative Evidence): Temporal Persistence of Objects}
+\item 관찰: DreamerV3에서는 잠수함이 물고기에 접근할 때 물고기가 흐려지고 멀어지면 다시 선명해짐. Drama에서는 일정 주기마다 물고기가 흐려졌다가 제자리에 다시 선명해지는 현상이 발생함.
+\item 분석: 물고기가 시야에서 벗어나지 않았음에도 다음 프레임들에서 원래 궤적대로 선명하게 다시 나타난다는 사실은, 모델의 Hidden state가 객체의 존재론적(ontological) 정보를 한 순간도 잃지 않았음을 논리적으로 증명함.
+\item 결론: 물고기가 흐려지는 것은 인코더의 정보 손실이 아니라, 단순히 디코더(Decoder)의 렌더링 한계(실패)일 뿐임. 즉, Reconstruction Quality는 Representation의 실제 정보량을 판단하는 기만적인(deceptive) 지표임.
+\item \textbf{[Figure 삽입 가이드]} 프레임 연속 캡처 사진(Sequence Figure)
+    \begin{itemize}
+    \item 가로축: 시간 흐름 ($t-1$, $t$, $t+1$)
+    \item 세로축 (행): Top (Ground Truth), Middle (DreamerV3 디코딩), Bottom (Drama 디코딩)
+    \item 캡션 내용: $t$ 시점에서 디코더는 객체 렌더링에 실패하지만, $t+1$에서 제자리에 완벽히 복원되는 모습을 통해 잠재 상태($z$)의 시간적 지속성(Temporal Persistence)을 보여줌.
+    \end{itemize}
+\end{itemize}
+
+\subsection{Preliminary Observation: The Cosine Similarity Clue}
+\textbf{- [해야 할 실험 결과 삽입]}
+
+\begin{itemize}
+\item 연구의 출발점이 된 첫 번째 발견(Motivating Observation) 소개.
+\end{itemize}
+\begin{itemize}
+\item 방법: 화면의 다른 모든 배경은 동일하고 오직 '잠수부의 개수'만 다른 두 Crop 이미지를 인코더에 통과시킴.
+\end{itemize}
+\begin{itemize}
+\item 관찰: 두 이미지에서 추출된 Latent State 간의 코사인 유사도(Cosine Similarity)를 측정해보니 1이 아니라 명확히 1보다 작은 값이 나옴.
+\end{itemize}
+\begin{itemize}
+\item 의미: 만약 인코더가 너무 작아서 안 보이는 잠수부를 통째로 무시(정보 유실)했다면 유사도는 1이 나와야 함. 유사도가 1 미만이라는 사실은, 시각적으로는 보이지 않더라도 인코더가 그 미세한 픽셀 차이(잠수부 유무)를 감지하고 다른 잠재 공간으로 매핑하고 있다는 강력한 단서임. 이를 확실히 검증하기 위해 다음 섹션의 Probing 실험을 진행함.
+\end{itemize}
+
+\subsection{Probing the Latent Space (Representation Analysis)}
+\textbf{- [해야 할 실험 결과 삽입]}
+
+\begin{itemize}
+\item 대상 게임: Seaquest (가장 극단적인 sparse reward 및 작은 객체 환경)
+\end{itemize}
+\begin{itemize}
+\item 방법: 인코더를 고정(detach, no gradient flow)하고 아주 가벼운 MLP(Linear or 2-layer)를 붙여서 RAM 데이터에서 추출한 정답 레이블과 비교.
+\end{itemize}
+\begin{itemize}
+\item 1. 화면 하단 잠수부 개수 (분류)
+\end{itemize}
+\begin{itemize}
+\item 2. 화면 상 잠수부 존재 여부 (이진 분류)
+\end{itemize}
+\begin{itemize}
+\item 3. 화면 상 잠수부의 x, y 좌표 (회귀)
+\end{itemize}
+\begin{itemize}
+\item 결과: "MLP가 매우 높은 정확도로 위 정보들을 예측해냈다. 즉, 디코더 결과물과 상관없이 $z$에는 이미 정보가 완벽히 들어있다."
+\end{itemize}
+
+\subsection{Robustness to Spatial Noise: Refuting the Blurring Hypothesis}
+\textbf{- [해야 할 실험 결과 삽입]}
+
+\begin{itemize}
+\item 반박 대상: DIAMOND 등의 최신 Diffusion 모델 논문들이 주장하는 "기존 인코더는 정보가 뭉개지거나(blurr) 위치 정보가 섞인다"는 가설.
+\end{itemize}
+\begin{itemize}
+\item 방법: 원본 이미지에서 잠수부 위치만 그대로 두고, 배경 등 나머지 공간에 랜덤 노이즈를 강하게 주입하여 인코더에 통과시킴.
+\end{itemize}
+\begin{itemize}
+\item 논리: 만약 DIAMOND의 주장대로 잠수부의 정보가 화면의 다른 위치 공간과 섞이거나(blurr) 뭉개졌다면, 다른 위치에 주입된 극심한 노이즈로 인해 잠수부를 검출하는 능력이 크게 훼손되어야 함.
+\end{itemize}
+\begin{itemize}
+\item 결과: "이 상태로 인코딩한 $z$로도 여전히 잠수부의 위치와 개수를 정확히 맞춘다. 이는 인코더가 공간적 정보를 섞지 않고 핵심 객체의 특징을 강건하게(robustly) 분리(disentangle)해내는 능력이 이미 있음을 증명하며, 기존 모델들의 실패 원인이 Blurring 때문이라는 주장을 완벽히 논파한다."
+\end{itemize}
+
+\section{Identifying the Real Bottleneck: Actor-Critic Optimization}
+\textbf{[작성 가이드: 진짜 병목이 Actor-Critic에 있음을 주장하는 섹션]}
+
+\subsection{High Variance Across Random Seeds}
+\textbf{- [해야 할 실험 결과 삽입]}
+
+\begin{itemize}
+\item 기존 모델을 여러 시드로 돌렸을 때 성능이 천차만별로 튀는 그래프(분산 밴드가 넓은 그래프) 삽입.
+\end{itemize}
+\begin{itemize}
+\item "만약 Representation 학습 자체가 문제였다면 시드와 무관하게 아예 학습이 불가능해야 한다. 하지만 어떤 시드에서는 성공하고 어떤 시드에서는 실패한다는 것은, RL 본연의 Policy/Q-value 최적화 과정이 매우 불안정하다는 증거다."
+\end{itemize}
+
+\subsection{The Challenge of Sparse Rewards and Credit Assignment}
+\begin{itemize}
+\item 환경의 특성 분석: Seaquest는 6명의 잠수부를 모으고 수면으로 올라가야만 보상이 주어지는 극단적 지연 보상(Extreme Delayed Reward) 환경.
+\end{itemize}
+\begin{itemize}
+\item "따라서 문제는 인코딩이 아니라, 탐험(Exploration) 과정에서 얻어걸린 드문 보상을 과거의 수많은 행동들에 제대로 할당(Credit Assignment)하지 못하는 Actor-Critic 구조의 한계다."
+\end{itemize}
+
+\section{Proposed Method: Efficient Episodic Retrieval for Actor-Critic}
+\textbf{[작성 가이드: 제안하는 기법 상세 설명]}
+
+\subsection{Episodic Memory and Retrieval Mechanism}
+\begin{itemize}
+\item "이 불안정한 Actor-Critic 최적화를 돕기 위해 무거운 Diffusion을 쓰는 대신, 가벼운 검색(Retrieval) 메커니즘을 도입한다."
+\end{itemize}
+\begin{itemize}
+\item [수식 및 알고리즘 설명 삽입] 어떻게 과거 에피소드의 정보를 저장하고 탐색하여 적용하는지 명확히 서술.
+\end{itemize}
+
+\subsection{Curriculum Activation (Optional / Heuristics)}
+\begin{itemize}
+\item 언제 Retrieval을 활성화할 것인지에 대한 전략 설명.
+\end{itemize}
+\begin{itemize}
+\item 방법 1 (고정): 20,000 스텝 등 일정 수준 월드 모델이 안정화된 이후 활성화.
+\end{itemize}
+\begin{itemize}
+\item 방법 2 (적응형): '근처 3개 에피소드 중 최댓값'의 증가 속도가 급격히 폭증하는 스텝부터 활성화. (논문에서는 베이스라인을 고정 스텝으로 잡고, 적응형은 부가적으로 설명하는 것을 추천)
+\end{itemize}
+
+\section{Experiments}
+\textbf{[작성 가이드: 실험 결과를 통한 증명. Seaquest의 근본적 한계와 Frostbite에서의 성공을 대조하는 것이 핵심.]}
+
+\subsection{Experimental Setup}
+\begin{itemize}
+\item 타겟 게임들: Seaquest (극한의 지연 보상), Frostbite (부분 보상이 있는 덜 극한의 환경) 및 기타 Atari 환경들.
+\end{itemize}
+
+\subsection{Main Performance: The Impact on Different Reward Structures}
+\textbf{- [해야 할 실험 결과 삽입]}
+
+\begin{itemize}
+\item 1. Frostbite 결과: "부분 보상이 있는 환경에서는 우리의 기법이 Actor-Critic 병목을 완벽히 해소하며 성능이 폭발적으로 상승함."
+\end{itemize}
+\begin{itemize}
+\item 2. Seaquest 결과: "성능 향상이 제한적이나, 이는 기법의 실패가 아니라 '탐험(Exploration)' 문제의 근본적인 어려움 때문임."
+\end{itemize}
+\begin{itemize}
+\item 결론: "우리의 기법이 강화학습의 최적화 과정을 크게 안정화시킴을 입증."
+\end{itemize}
+
+\subsection{Variance Reduction and Stability}
+\textbf{- [해야 할 실험 결과 삽입]}
+
+\begin{itemize}
+\item 제안 기법을 적용했을 때, 기존 대비 시드별 성능 편차(Variance)가 극적으로 줄어든 그래프 삽입.
+\end{itemize}
+\begin{itemize}
+\item "최적화 병목이 해소되어 학습이 매우 안정적으로 진행됨."
+\end{itemize}
+
+\subsection{Computational Efficiency: Time Complexity Analysis}
+\begin{itemize}
+\item [해야 할 실험/분석 결과 삽입]
+\end{itemize}
+\begin{itemize}
+\item Diffusion RL 모델들과의 연산량 비교.
+\end{itemize}
+\begin{itemize}
+\item "우리의 Retrieval 기법이 코딩 레벨에서 저장, 탐색, 적용에 드는 시간 복잡도를 분석한 결과, FPS(Frames Per Second) 측면에서 Diffusion 대비 압도적으로 빠르다." (표 또는 그래프 필수)
+\end{itemize}
+
+\subsection{Train vs. Evaluation Performance Gap (Discussion)}
+\textbf{- [해야 할 실험 결과 삽입]}
+
+\begin{itemize}
+\item 학습 중 에피소드 스코어는 낮게 유지되지만, 평가(Evaluation) 스코어는 월등히 높은 현상 분석.
+\end{itemize}
+\begin{itemize}
+\item "이는 에이전트가 오프폴리시(Off-policy) 탐험 중 얻은 노이즈 낀 데이터로부터도 정답(Optimal Policy)을 내부적으로 완벽하게 최적화해내고 있다는 강력한 증거다."
+\end{itemize}
+
+\section{Conclusion}
+\textbf{[작성 가이드: 결론]}
+
+\begin{itemize}
+\item "Representation의 시각적 품질에 집착하는 현 트렌드를 비판하고, 진짜 병목인 Actor-Critic 최적화 문제를 저비용 고효율로 해결했다."
+\end{itemize}
 
-ICLR requires electronic submissions, processed by
-\url{https://openreview.net/}. See ICLR's website for more instructions.
-
-If your paper is ultimately accepted, the statement {\tt
-  {\textbackslash}iclrfinalcopy} should be inserted to adjust the
-format to the camera ready requirements.
-
-The format for the submissions is a variant of the NeurIPS format.
-Please read carefully the instructions below, and follow them
-faithfully.
-
-\subsection{Style}
-
-Papers to be submitted to ICLR 2027 must be prepared according to the
-instructions presented here.
-
-%% Please note that we have introduced automatic line number generation
-%% into the style file for \LaTeXe. This is to help reviewers
-%% refer to specific lines of the paper when they make their comments. Please do
-%% NOT refer to these line numbers in your paper as they will be removed from the
-%% style file for the final version of accepted papers.
-
-Authors are required to use the ICLR \LaTeX{} style files obtainable at the
-ICLR website. Please make sure you use the current files and
-not previous versions. Tweaking the style files may be grounds for rejection.
-
-\subsection{Retrieval of style files}
-
-The style files for ICLR and other conference information are available online at:
-\begin{center}
-   \url{http://www.iclr.cc/}
-\end{center}
-The file \verb+iclr2027_conference.pdf+ contains these
-instructions and illustrates the
-various formatting requirements your ICLR paper must satisfy.
-Submissions must be made using \LaTeX{} and the style files
-\verb+iclr2027_conference.sty+ and \verb+iclr2027_conference.bst+ (to be used with \LaTeX{}2e). The file
-\verb+iclr2027_conference.tex+ may be used as a ``shell'' for writing your paper. All you
-have to do is replace the author, title, abstract, and text of the paper with
-your own.
-
-The formatting instructions contained in these style files are summarized in
-sections \ref{gen_inst}, \ref{headings}, and \ref{others} below.
-
-\section{General formatting instructions}
-\label{gen_inst}
-
-The text must be confined within a rectangle 5.5~inches (33~picas) wide and
-9~inches (54~picas) long. The left margin is 1.5~inch (9~picas).
-Use 10~point type with a vertical spacing of 11~points. Times New Roman is the
-preferred typeface throughout. Paragraphs are separated by 1/2~line space,
-with no indentation.
-
-Paper title is 17~point, in small caps and left-aligned.
-All pages should start at 1~inch (6~picas) from the top of the page.
-
-Authors' names are
-set in boldface, and each name is placed above its corresponding
-address. The lead author's name is to be listed first, and
-the co-authors' names are set to follow. Authors sharing the
-same address can be on the same line.
-
-Please pay special attention to the instructions in section \ref{others}
-regarding figures, tables, acknowledgments, and references.
-
-
-There will be a strict upper limit of \textbf{9 pages} for the main text of the initial submission, with unlimited additional pages for citations. This limit will be expanded to \textbf{10 pages} for rebuttal/camera ready.
-
-\section{Headings: first level}
-\label{headings}
-
-First level headings are in small caps,
-flush left and in point size 12. One line space before the first level
-heading and 1/2~line space after the first level heading.
-
-\subsection{Headings: second level}
-
-Second level headings are in small caps,
-flush left and in point size 10. One line space before the second level
-heading and 1/2~line space after the second level heading.
-
-\subsubsection{Headings: third level}
-
-Third level headings are in small caps,
-flush left and in point size 10. One line space before the third level
-heading and 1/2~line space after the third level heading.
-
-\section{Citations, figures, tables, references}
-\label{others}
-
-These instructions apply to everyone, regardless of the formatter being used.
-
-\subsection{Citations within the text}
-
-Citations within the text should be based on the \texttt{natbib} package
-and include the authors' last names and year (with the ``et~al.'' construct
-for more than two authors). When the authors or the publication are
-included in the sentence, the citation should not be in parenthesis using \verb|\citet{}| (as
-in ``See \citet{Hinton06} for more information.''). Otherwise, the citation
-should be in parenthesis using \verb|\citep{}| (as in ``Deep learning shows promise to make progress
-towards AI~\citep{Bengio+chapter2007}.'').
-
-The corresponding references are to be listed in alphabetical order of
-authors, in the \textsc{References} section. As to the format of the
-references themselves, any style is acceptable as long as it is used
-consistently.
-
-\subsection{Footnotes}
-
-Indicate footnotes with a number\footnote{Sample of the first footnote} in the
-text. Place the footnotes at the bottom of the page on which they appear.
-Precede the footnote with a horizontal rule of 2~inches
-(12~picas).\footnote{Sample of the second footnote}
-
-\subsection{Figures}
-
-All artwork must be neat, clean, and legible. Lines should be dark
-enough for purposes of reproduction; art work should not be
-hand-drawn. The figure number and caption always appear after the
-figure. Place one line space before the figure caption, and one line
-space after the figure. The figure caption is lower case (except for
-first word and proper nouns); figures are numbered consecutively.
-
-Make sure the figure caption does not get separated from the figure.
-Leave sufficient space to avoid splitting the figure and figure caption.
-
-You may use color figures.
-However, it is best for the
-figure captions and the paper body to make sense if the paper is printed
-either in black/white or in color.
-\begin{figure}[h]
-\begin{center}
-%\framebox[4.0in]{$\;$}
-\fbox{\rule[-.5cm]{0cm}{4cm} \rule[-.5cm]{4cm}{0cm}}
-\end{center}
-\caption{Sample figure caption.}
-\end{figure}
-
-\subsection{Tables}
-
-All tables must be centered, neat, clean and legible. Do not use hand-drawn
-tables. The table number and title always appear before the table. See
-Table~\ref{sample-table}.
-
-Place one line space before the table title, one line space after the table
-title, and one line space after the table. The table title must be lower case
-(except for first word and proper nouns); tables are numbered consecutively.
-
-\begin{table}[t]
-\caption{Sample table title}
-\label{sample-table}
-\begin{center}
-\begin{tabular}{ll}
-\multicolumn{1}{c}{\bf PART}  &\multicolumn{1}{c}{\bf DESCRIPTION}
-\\ \hline \\
-Dendrite         &Input terminal \\
-Axon             &Output terminal \\
-Soma             &Cell body (contains cell nucleus) \\
-\end{tabular}
-\end{center}
-\end{table}
-
-\section{Default Notation}
-
-In an attempt to encourage standardized notation, we have included the
-notation file from the textbook, \textit{Deep Learning}
-\cite{goodfellow2016deep} available at
-\url{https://github.com/goodfeli/dlbook_notation/}.  Use of this style
-is not required and can be disabled by commenting out
-\texttt{math\_commands.tex}.
-
-
-\centerline{\bf Numbers and Arrays}
-\bgroup
-\def\arraystretch{1.5}
-\begin{tabular}{p{1in}p{3.25in}}
-$\displaystyle a$ & A scalar (integer or real)\\
-$\displaystyle \va$ & A vector\\
-$\displaystyle \mA$ & A matrix\\
-$\displaystyle \tA$ & A tensor\\
-$\displaystyle \mI_n$ & Identity matrix with $n$ rows and $n$ columns\\
-$\displaystyle \mI$ & Identity matrix with dimensionality implied by context\\
-$\displaystyle \ve^{(i)}$ & Standard basis vector $[0,\dots,0,1,0,\dots,0]$ with a 1 at position $i$\\
-$\displaystyle \text{diag}(\va)$ & A square, diagonal matrix with diagonal entries given by $\va$\\
-$\displaystyle \ra$ & A scalar random variable\\
-$\displaystyle \rva$ & A vector-valued random variable\\
-$\displaystyle \rmA$ & A matrix-valued random variable\\
-\end{tabular}
-\egroup
-\vspace{0.25cm}
-
-\centerline{\bf Sets and Graphs}
-\bgroup
-\def\arraystretch{1.5}
-
-\begin{tabular}{p{1.25in}p{3.25in}}
-$\displaystyle \sA$ & A set\\
-$\displaystyle \R$ & The set of real numbers \\
-$\displaystyle \{0, 1\}$ & The set containing 0 and 1 \\
-$\displaystyle \{0, 1, \dots, n \}$ & The set of all integers between $0$ and $n$\\
-$\displaystyle [a, b]$ & The real interval including $a$ and $b$\\
-$\displaystyle (a, b]$ & The real interval excluding $a$ but including $b$\\
-$\displaystyle \sA \backslash \sB$ & Set subtraction, i.e., the set containing the elements of $\sA$ that are not in $\sB$\\
-$\displaystyle \gG$ & A graph\\
-$\displaystyle \parents_\gG(\ervx_i)$ & The parents of $\ervx_i$ in $\gG$
-\end{tabular}
-\vspace{0.25cm}
-
-
-\centerline{\bf Indexing}
-\bgroup
-\def\arraystretch{1.5}
-
-\begin{tabular}{p{1.25in}p{3.25in}}
-$\displaystyle \eva_i$ & Element $i$ of vector $\va$, with indexing starting at 1 \\
-$\displaystyle \eva_{-i}$ & All elements of vector $\va$ except for element $i$ \\
-$\displaystyle \emA_{i,j}$ & Element $i, j$ of matrix $\mA$ \\
-$\displaystyle \mA_{i, :}$ & Row $i$ of matrix $\mA$ \\
-$\displaystyle \mA_{:, i}$ & Column $i$ of matrix $\mA$ \\
-$\displaystyle \etA_{i, j, k}$ & Element $(i, j, k)$ of a 3-D tensor $\tA$\\
-$\displaystyle \tA_{:, :, i}$ & 2-D slice of a 3-D tensor\\
-$\displaystyle \erva_i$ & Element $i$ of the random vector $\rva$ \\
-\end{tabular}
-\egroup
-\vspace{0.25cm}
-
-
-\centerline{\bf Calculus}
-\bgroup
-\def\arraystretch{1.5}
-\begin{tabular}{p{1.25in}p{3.25in}}
-% NOTE: the [2ex] on the next line adds extra height to that row of the table.
-% Without that command, the fraction on the first line is too tall and collides
-% with the fraction on the second line.
-$\displaystyle\frac{d y} {d x}$ & Derivative of $y$ with respect to $x$\\ [2ex]
-$\displaystyle \frac{\partial y} {\partial x} $ & Partial derivative of $y$ with respect to $x$ \\
-$\displaystyle \nabla_\vx y $ & Gradient of $y$ with respect to $\vx$ \\
-$\displaystyle \nabla_\mX y $ & Matrix derivatives of $y$ with respect to $\mX$ \\
-$\displaystyle \nabla_\tX y $ & Tensor containing derivatives of $y$ with respect to $\tX$ \\
-$\displaystyle \frac{\partial f}{\partial \vx} $ & Jacobian matrix $\mJ \in \R^{m\times n}$ of $f: \R^n \rightarrow \R^m$\\
-$\displaystyle \nabla_\vx^2 f(\vx)\text{ or }\mH( f)(\vx)$ & The Hessian matrix of $f$ at input point $\vx$\\
-$\displaystyle \int f(\vx) d\vx $ & Definite integral over the entire domain of $\vx$ \\
-$\displaystyle \int_\sS f(\vx) d\vx$ & Definite integral with respect to $\vx$ over the set $\sS$ \\
-\end{tabular}
-\egroup
-\vspace{0.25cm}
-
-\centerline{\bf Probability and Information Theory}
-\bgroup
-\def\arraystretch{1.5}
-\begin{tabular}{p{1.25in}p{3.25in}}
-$\displaystyle P(\ra)$ & A probability distribution over a discrete variable\\
-$\displaystyle p(\ra)$ & A probability distribution over a continuous variable, or over
-a variable whose type has not been specified\\
-$\displaystyle \ra \sim P$ & Random variable $\ra$ has distribution $P$\\% so thing on left of \sim should always be a random variable, with name beginning with \r
-$\displaystyle  \E_{\rx\sim P} [ f(x) ]\text{ or } \E f(x)$ & Expectation of $f(x)$ with respect to $P(\rx)$ \\
-$\displaystyle \Var(f(x)) $ &  Variance of $f(x)$ under $P(\rx)$ \\
-$\displaystyle \Cov(f(x),g(x)) $ & Covariance of $f(x)$ and $g(x)$ under $P(\rx)$\\
-$\displaystyle H(\rx) $ & Shannon entropy of the random variable $\rx$\\
-$\displaystyle \KL ( P \Vert Q ) $ & Kullback-Leibler divergence of P and Q \\
-$\displaystyle \mathcal{N} ( \vx ; \vmu , \mSigma)$ & Gaussian distribution %
-over $\vx$ with mean $\vmu$ and covariance $\mSigma$ \\
-\end{tabular}
-\egroup
-\vspace{0.25cm}
-
-\centerline{\bf Functions}
-\bgroup
-\def\arraystretch{1.5}
-\begin{tabular}{p{1.25in}p{3.25in}}
-$\displaystyle f: \sA \rightarrow \sB$ & The function $f$ with domain $\sA$ and range $\sB$\\
-$\displaystyle f \circ g $ & Composition of the functions $f$ and $g$ \\
-  $\displaystyle f(\vx ; \vtheta) $ & A function of $\vx$ parametrized by $\vtheta$.
-  (Sometimes we write $f(\vx)$ and omit the argument $\vtheta$ to lighten notation) \\
-$\displaystyle \log x$ & Natural logarithm of $x$ \\
-$\displaystyle \sigma(x)$ & Logistic sigmoid, $\displaystyle \frac{1} {1 + \exp(-x)}$ \\
-$\displaystyle \zeta(x)$ & Softplus, $\log(1 + \exp(x))$ \\
-$\displaystyle || \vx ||_p $ & $\normlp$ norm of $\vx$ \\
-$\displaystyle || \vx || $ & $\normltwo$ norm of $\vx$ \\
-$\displaystyle x^+$ & Positive part of $x$, i.e., $\max(0,x)$\\
-$\displaystyle \1_\mathrm{condition}$ & is 1 if the condition is true, 0 otherwise\\
-\end{tabular}
-\egroup
-\vspace{0.25cm}
-
-
-
-\section{Final instructions}
-Do not change any aspects of the formatting parameters in the style files.
-In particular, do not modify the width or length of the rectangle the text
-should fit into, and do not change font sizes (except perhaps in the
-\textsc{References} section; see below). Please note that pages should be
-numbered.
-
-\section{Preparing PostScript or PDF files}
-
-Please prepare PostScript or PDF files with paper size ``US Letter'', and
-not, for example, ``A4''. The -t
-letter option on dvips will produce US Letter files.
-
-Consider directly generating PDF files using \verb+pdflatex+
-(especially if you are a MiKTeX user).
-PDF figures must be substituted for EPS figures, however.
-
-Otherwise, please generate your PostScript and PDF files with the following commands:
-\begin{verbatim}
-dvips mypaper.dvi -t letter -Ppdf -G0 -o mypaper.ps
-ps2pdf mypaper.ps mypaper.pdf
-\end{verbatim}
-
-\subsection{Margins in LaTeX}
-
-Most of the margin problems come from figures positioned by hand using
-\verb+\special+ or other commands. We suggest using the command
-\verb+\includegraphics+
-from the graphicx package. Always specify the figure width as a multiple of
-the line width as in the example below using .eps graphics
-\begin{verbatim}
-   \usepackage[dvips]{graphicx} ...
-   \includegraphics[width=0.8\linewidth]{myfile.eps}
-\end{verbatim}
-or % Apr 2009 addition
-\begin{verbatim}
-   \usepackage[pdftex]{graphicx} ...
-   \includegraphics[width=0.8\linewidth]{myfile.pdf}
-\end{verbatim}
-for .pdf graphics.
-See section~4.4 in the graphics bundle documentation (\url{http://www.ctan.org/tex-archive/macros/latex/required/graphics/grfguide.ps})
-
-A number of width problems arise when LaTeX cannot properly hyphenate a
-line. Please give LaTeX hyphenation hints using the \verb+\-+ command.
-
-\subsection*{AI use statement}
-
-(This section is \textbf{required} and does not count toward the page limit.)
-
-In this work, we used generative AI tools for [tasks with required disclosure].
-We have not used generative AI tools for [other tasks with required disclosure],
-and [the rest of the required disclosure tasks] are not applicable to this work.
-Additionally, we used generative AI tools for [tasks with recommended
-disclosure]. We have reviewed all AI-assisted work. [Elaborate. For example, “we
-checked LLM-generated research ideas for potential plagiarism through a manual
-literature survey”, “LLM-generated code was verified and tested for correctness
-by 2 authors”, etc.]. We take responsibility for the final content of this work,
-including text, claims or artifacts produced with the aid of generative AI.
-
-See the ICLR 2027 AI Policy for Authors for more details. This statement should
-not be more than 1 page.
-
-\subsection*{Ethics statement}
-
-(This section is \textbf{recommended} and does not count toward the page limit.)
-
-If authors feel that their paper submission raises questions regarding the Code
-of Ethics, they are encouraged to include a paragraph of Ethics Statement (at
-the end of the main text before references) to address potential concerns where
-appropriate. Topics include, but are not limited to, studies that involve human
-subjects, practices to data set releases, potentially harmful insights,
-methodologies and applications, potential conflicts of interest and sponsorship,
-discrimination/bias/fairness concerns, privacy and security issues, legal
-compliance, and research integrity issues (e.g., IRB, documentation, research
-ethics). This statement should not be more than 1 page.
-
-\subsection*{Reproducibility statement}
-
-(This section is \textbf{recommended} and does not count toward the page limit.)
-
-It is important that the work published in ICLR is reproducible. Authors are
-strongly encouraged to include a paragraph-long Reproducibility Statement at the
-end of the main text (before references) to discuss the efforts that have been
-made to ensure reproducibility. This paragraph should not itself describe
-details needed for reproducing the results, but rather reference the parts of
-the main paper, appendix, and supplemental materials that will help with
-reproducibility. For example, for novel models or algorithms, a link to an
-anonymous downloadable source code can be submitted as supplementary materials;
-for theoretical results, clear explanations of any assumptions and a complete
-proof of the claims can be included in the appendix; for any datasets used in
-the experiments, a complete description of the data processing steps can be
-provided in the supplementary materials. Each of the above are examples of
-things that can be referenced in the reproducibility statement.
-
-\subsubsection*{Author Contributions}
-If you'd like to, you may include  a section for author contributions as is done
-in many journals. This is optional and at the discretion of the authors.
-
-\subsubsection*{Acknowledgments}
-Use unnumbered third level headings for the acknowledgments. All
-acknowledgments, including those to funding agencies, go at the end of the paper.
 
 
 \bibliography{iclr2027_conference}
