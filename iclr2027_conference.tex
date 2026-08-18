@@ -1,51 +1,29 @@
-% 월드 모델이 병목이 아닌 근거에 필요한 실험이 뭔지 알아내기. Cos sim이 1이 아닌 걸로 충분? 아니라면 blurr는 쉽게 충분히 구분됳 수 있음을 수학적으로 증명하는게 필요? 애초에 논문 자체를 분석 비중을 절반 정도는 해야할듯. 드라마 평상세, 드리머 접근시 물고기가 흐려졌다가 다시 선명해진느 것으로 물고기 정보는 제대로 보존되어 있으나 디코더가 뭄제임을 알 수 있음. 가벼운 MLP로 하단의 잠수부 개수와 화면 상에 잠수부가 있는지, 위치는 어딘지를 예측하도록 해볼까? 절대 월드 모델에는 gradient가 가지 않도록 말이야. 하단 잠수부 개수는 이미 대충 알아서 쉬운데, 화면 상의 잠수부 개수와 위치도 환경이 ram에 담아주는지 확인해봐야 함. Blurr가 안 됨을 증명하기 위해 잠수부 위치는 똑같고 다른 부분은 랜점 노이즈 라무렇게나 줘봐서 확률이 괜찮은 수준으로 유지되는지 실험. 이런걸 몇 개의 게임에 대해 해야 할까? 시드가 달라져도 성능 천차만별인 것도 액터 크리틱의 문제로 볼 수 있을 듯. Retrieval 시간복잡도를 코드 기준으로 면밀히 분석. 저당, 탐색, 적용 등. '근처 3?개 에피소드 중 최댓값'의 증가 속도가 급격히 폭증하는 스텝부터 retrieval을 활성화하도록 하거나, 아니면 그냥 20000스텝으로 고정. 
-
-
 \documentclass{article} % For LaTeX2e
 \usepackage{iclr2027_conference,times}
-\usepackage{kotex} % 한국어 출력을 위해 추가
-\usepackage{booktabs} % 표를 예쁘게 그리기 위해 추가
-\usepackage{graphicx} % 표 크기 조절을 위해 추가
-% Optional math commands from https://github.com/goodfeli/dlbook_notation.
+\usepackage{kotex} % 한국어 출력을 위해 추가 (필요시 나중에 제거)
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{amsmath}
 \input{math_commands.tex}
 
 \usepackage{hyperref}
 \usepackage{url}
+\usepackage{color}
 
+% 빈칸(TODO)을 쉽게 찾을 수 있도록 강조하는 매크로
+\newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
 
-\title{Formatting Instructions for ICLR 2027 \\ Conference Submissions}
+\title{\todo{여기에 논문의 공식 영문 제목을 적어주세요. 예: Are Heavy Representations Necessary in RL? Empowering Actor-Critic with Efficient Episodic Retrieval}}
 
-% Authors must not appear in the submitted version. They should be hidden
-% as long as the \iclrfinalcopy macro remains commented out below.
-% Non-anonymous submissions will be rejected without review.
-
-\author{Antiquus S.~Hippocampus, Natalia Cerebro \& Amelie P. Amygdale \thanks{ Use footnote for providing further information
-about author (webpage, alternative address)---\emph{not} for acknowledging
-funding agencies.  Funding acknowledgements go at the end of the paper.} \\
-Department of Computer Science\\
-Cranberry-Lemon University\\
-Pittsburgh, PA 15213, USA \\
-\texttt{\{hippo,brain,jen\}@cs.cranberry-lemon.edu} \\
+\author{\todo{저자 1 이름} \\
+\todo{저자 1 소속 기관} \\
+\texttt{\todo{저자1 이메일}} \\
 \And
-Ji Q. Ren \& Yevgeny LeNet \\
-Department of Computational Neuroscience \\
-University of the Witwatersrand \\
-Joburg, South Africa \\
-\texttt{\{robot,net\}@wits.za} \\
-\AND
-Coauthor \\
-Affiliation \\
-Address \\
-\texttt{email}
+\todo{저자 2 이름} \\
+\todo{저자 2 소속 기관} \\
+\texttt{\todo{저자2 이메일}} \\
+% 필요한 만큼 \And 로 추가하세요
 }
-
-% The \author macro works with any number of authors. There are two commands
-% used to separate the names and addresses of multiple authors: \And and \AND.
-%
-% Using \And between authors leaves it to \LaTeX{} to determine where to break
-% the lines. Using \AND forces a linebreak at that point. So, if \LaTeX{}
-% puts 3 of 4 authors names on the first line, and the last on the second
-% line, try using \AND instead of \And before the third author name.
 
 \newcommand{\fix}{\marginpar{FIX}}
 \newcommand{\new}{\marginpar{NEW}}
@@ -53,292 +31,205 @@ Address \\
 %\iclrfinalcopy % Uncomment for camera-ready version, but NOT for submission.
 \begin{document}
 
-
 \maketitle
 
 \begin{abstract}
-\textbf{[작성 가이드: 초록 작성]}
-
-1. 배경: 최근 강화학습에서 세계 모델(World Model) 및 Diffusion 기반 기법들이 널리 쓰이나, 연산량이 너무 크다는 문제 제기.
-2. 핵심 발견 (가장 중요): 기존 모델들의 성능이 떨어지는 것은 'Reconstruction(복원)이 안 되어서(Representation이 부족해서)'가 아님을 증명. 사실 인코더는 이미 충분한 정보를 담고 있다.
-3. 진짜 문제점 지적: 여러 시드(Seed)에 따른 극심한 성능 편차 등은 병목 현상이 Representation이 아니라 Actor-Critic의 최적화 과정에 있음을 시사함.
-4. 제안 방법: 무거운 Diffusion 대신, Actor-Critic의 최적화를 돕는 효율적인 Episodic Retrieval(경험 검색) 기법을 제안.
-5. 결과: 기존 SOTA와 동등 이상의 성능을 극도로 적은 연산량(높은 FPS)으로 달성함. 특히 탐험에 성공한 시드(Seed)의 경우 평가 점수(Eval Score)를 극대화하는 'Exploitation Amplifier' 역할을 수행함.
+Recent advancements in Reinforcement Learning (RL) have heavily adopted World Models and Diffusion-based techniques; however, they often suffer from prohibitive computational costs. In this paper, we first debunk the prevailing myth that the performance bottleneck of existing models lies in their representation capacity (e.g., poor image reconstruction). Through rigorous probing and analysis, we demonstrate that existing lightweight encoders already capture sufficient and robust object-level information, contrary to recent claims of spatial blurring. We reveal that the true bottleneck resides in the optimization process of the Actor-Critic architecture, particularly its high variance and inefficiency in handling extreme delayed rewards during exploration. To address this, we propose FLASH (Fast Latent Anchor Search with Hashing), a lightweight and efficient mechanism that directly aids Actor-Critic optimization without relying on computationally heavy diffusion processes. Our method achieves performance comparable to or exceeding state-of-the-art methods while operating at significantly higher frames per second (FPS). Crucially, our approach acts as a powerful "Exploitation Amplifier," maximizing the evaluation scores of seeds that successfully explore sparse rewards, all with negligible computational overhead.
 \end{abstract}
 
 \section{Introduction}
-\textbf{[작성 가이드: 서론 작성]}
+\label{sec:intro}
 
-\begin{itemize}
-\item 최근 강화학습에서 Diffusion 모델의 유행과 그로 인한 막대한 비용(Cost/Latency) 지적.
-\end{itemize}
-\begin{itemize}
-\item "정말 이 무거운 연산이 필수적인가? 병목은 다른 곳에 있는 것이 아닐까?"라는 의문 제기.
-\end{itemize}
-\begin{itemize}
-\item 시드별 성능 편차가 크다는 관측 결과를 언급하며, 진짜 문제는 'Actor-Critic의 불안정한 학습'에 있음을 주장.
-\end{itemize}
-\begin{itemize}
-\item 우리의 기여 요약: 1) Representation의 충분성 증명, 2) Actor-Critic 병목 지적, 3) 이를 해결하기 위한 Episodic Retrieval 기법 제안 및 효율성 입증.
-\end{itemize}
+Recently, the integration of Diffusion models into Reinforcement Learning (RL) has become increasingly popular, yielding strong performance in various benchmarks \todo{DIAMOND 등 Diffusion 기반 RL 최신 논문 인용}. However, this trend has brought about a significant drawback: massive computational costs and high latency during both training and inference. This raises a fundamental question: \textit{Are these heavy computational overheads truly necessary, or are we addressing the wrong bottleneck?}
+
+In this work, we argue that the current focus on enhancing representation quality through heavy generative models may be misguided. By observing the extreme performance variance across different random seeds in standard RL setups, we hypothesize that the primary issue is not the lack of representative power, but rather the inherent instability in the Actor-Critic optimization process. 
+
+Our contributions are threefold:
+First, we analytically prove the sufficiency of existing lightweight representations. We demonstrate that poor visual reconstruction does not equate to a loss of underlying semantic information.
+Second, we identify and highlight the Actor-Critic optimization—specifically the difficulty of credit assignment in environments with sparse and delayed rewards—as the actual bottleneck hindering RL performance.
+Finally, we propose FLASH, an efficient retrieval mechanism that augments the Actor-Critic architecture. By effectively storing and retrieving past experiences, our method stabilizes learning and acts as a powerful exploitation amplifier for successful exploration, achieving state-of-the-art results with minimal computational overhead.
 
 \section{Related Work}
-\textbf{[작성 가이드: 관련 연구 작성]}
+\label{sec:related}
 
-\begin{itemize}
-\item RL에서의 Representation Learning
-\end{itemize}
-\begin{itemize}
-\item Diffusion Models for Reinforcement Learning (과도한 연산량 지적)
-\end{itemize}
-\begin{itemize}
-\item Episodic Control / Retrieval-augmented RL (우리의 방법론과 유사한 이전 연구들과의 차별점 명시)
-\end{itemize}
+\textbf{Representation Learning in RL.} 
+\todo{기존 강화학습에서의 Representation Learning 논문들 (예: Dreamer 시리즈, CURL, SPR 등)을 나열하고 간략히 요약해주세요.}
+
+\textbf{Diffusion Models for Reinforcement Learning.}
+\todo{DIAMOND와 같이 최근 RL에 Diffusion을 접목한 연구들을 나열하고, 이들의 연산량이 과도하다는 한계점을 영어로 서술해주세요.}
+
+\textbf{Episodic Control and Retrieval-augmented RL.}
+\todo{Episodic Memory를 사용한 과거 연구들(예: Model-Free Episodic Control, EVA 등)을 나열하고, FLASH가 이들과 어떻게 차별화되는지(예: Actor-Critic의 병목을 명시적으로 타겟팅하며 연산량이 극도로 적음)를 적어주세요.}
 
 \section{Are Heavy Representations Necessary?: Decoding the Sufficiency of Encoders}
-\textbf{[작성 가이드: 기존 인코더가 이미 충분한 정보를 담고 있음을 증명하는 분석 섹션]}
+\label{sec:representation}
 
 \subsection{The Myth of Reconstruction Quality}
-\begin{itemize}
-\item 흔히 범하는 오류: "디코더 이미지가 흐릿하면 정보가 없다"는 착각.
-\item \textbf{정성적 증거 (Qualitative Evidence): Temporal Persistence of Objects}
-\item 관찰: DreamerV3에서는 잠수함이 물고기에 접근할 때 물고기가 흐려지고 멀어지면 다시 선명해짐. Drama에서는 일정 주기마다 물고기가 흐려졌다가 제자리에 다시 선명해지는 현상이 발생함.
-\item 분석: 물고기가 시야에서 벗어나지 않았음에도 다음 프레임들에서 원래 궤적대로 선명하게 다시 나타난다는 사실은, 모델의 Hidden state가 객체의 존재론적(ontological) 정보를 한 순간도 잃지 않았음을 논리적으로 증명함.
-\item 결론: 물고기가 흐려지는 것은 인코더의 정보 손실이 아니라, 단순히 디코더(Decoder)의 렌더링 한계(실패)일 뿐임. 즉, Reconstruction Quality는 Representation의 실제 정보량을 판단하는 기만적인(deceptive) 지표임.
-\item \textbf{[Figure 삽입 가이드]} 프레임 연속 캡처 사진(Sequence Figure)
-    \begin{itemize}
-    \item 가로축: 시간 흐름 ($t-1$, $t$, $t+1$)
-    \item 세로축 (행): Top (Ground Truth), Middle (DreamerV3 디코딩), Bottom (Drama 디코딩)
-    \item 캡션 내용: $t$ 시점에서 디코더는 객체 렌더링에 실패하지만, $t+1$에서 제자리에 완벽히 복원되는 모습을 통해 잠재 상태($z$)의 시간적 지속성(Temporal Persistence)을 보여줌.
-    \end{itemize}
-\end{itemize}
+A common fallacy in recent model-based RL research is the assumption that blurry decoded images imply a lack of information in the latent space. We argue that this is merely a rendering failure of the decoder.
+
+As qualitative evidence, we observe the \textit{temporal persistence of objects} in models like DreamerV3 and Drama \todo{해당 논문 인용}. For instance, when a submarine approaches a fish, the fish may blur or disappear from the decoded frame, only to reappear perfectly in its expected trajectory in subsequent frames. This phenomenon proves that the ontological information of the object was never lost in the latent state $z$; it was simply not rendered by the decoder at time $t$. Therefore, relying on reconstruction quality is a deceptive metric for evaluating the true capacity of an encoder.
+
+\begin{figure}[h]
+\centering
+\todo{여기에 프레임 연속 캡처 사진(Sequence Figure)의 파일 경로를 넣어주세요. 예: \textbackslash includegraphics[width=0.8\textbackslash textwidth]\{figures/temporal\_persistence.pdf\}}
+\caption{\todo{캡션 설명 완성하기: $t$ 시점에서 디코더는 객체 렌더링에 실패하지만, $t+1$에서 제자리에 완벽히 복원되는 모습을 보여주는 Figure 설명.}}
+\label{fig:temporal_persistence}
+\end{figure}
 
 \subsection{Preliminary Observation: The Cosine Similarity Clue}
-\textbf{- [해야 할 실험 결과 삽입]}
+To formally investigate the encoder's sensitivity to small details, we designed a motivating experiment. We passed two nearly identical image crops through the encoder: the only difference being the presence or absence of a single small diver in the frame.
 
-\begin{itemize}
-\item 연구의 출발점이 된 첫 번째 발견(Motivating Observation) 소개.
-\end{itemize}
-\begin{itemize}
-\item 방법: 화면의 다른 모든 배경은 동일하고 오직 '잠수부의 개수'만 다른 두 Crop 이미지를 인코더에 통과시킴.
-\end{itemize}
-\begin{itemize}
-\item 관찰: 두 이미지에서 추출된 Latent State 간의 코사인 유사도(Cosine Similarity)를 측정해보니 1이 아니라 명확히 1보다 작은 값이 나옴.
-\end{itemize}
-\begin{itemize}
-\item 의미: 만약 인코더가 너무 작아서 안 보이는 잠수부를 통째로 무시(정보 유실)했다면 유사도는 1이 나와야 함. 유사도가 1 미만이라는 사실은, 시각적으로는 보이지 않더라도 인코더가 그 미세한 픽셀 차이(잠수부 유무)를 감지하고 다른 잠재 공간으로 매핑하고 있다는 강력한 단서임. 이를 확실히 검증하기 위해 다음 섹션의 Probing 실험을 진행함.
-\end{itemize}
+Interestingly, the cosine similarity between the extracted latent states from these two images was \todo{여기에 실제 측정한 코사인 유사도 수치를 적어주세요. 예: 0.85}. If the lightweight encoder had completely ignored the diver, the similarity would have been exactly 1.0. The fact that it is strictly less than 1.0 provides a strong clue that the encoder successfully detects and maps this minute pixel difference into the latent space, motivating our subsequent probing analysis.
 
-\subsection{Probing the Latent Space (Representation Analysis)}
-\textbf{- [해야 할 실험 결과 삽입]}
+\subsection{Probing the Latent Space}
+To verify exactly what information the latent state $z$ contains, we conducted a probing experiment on the Seaquest environment, known for its extreme sparse rewards and tiny objects. We detached the pre-trained encoder (stopping gradient flow) and trained a lightweight MLP to predict ground-truth RAM states directly from $z$.
 
-\begin{itemize}
-\item 대상 게임: Seaquest (가장 극단적인 sparse reward 및 작은 객체 환경)
-\end{itemize}
-\begin{itemize}
-\item 방법: 인코더를 고정(detach, no gradient flow)하고 아주 가벼운 MLP(Linear or 2-layer)를 붙여서 RAM 데이터에서 추출한 정답 레이블과 비교.
-\end{itemize}
-\begin{itemize}
-\item 1. 화면 하단 잠수부 개수 (분류)
-\end{itemize}
-\begin{itemize}
-\item 2. 화면 상 잠수부 존재 여부 (이진 분류)
-\end{itemize}
-\begin{itemize}
-\item 3. 화면 상 잠수부의 x, y 좌표 (회귀)
-\end{itemize}
-\begin{itemize}
-\item 결과: "MLP가 매우 높은 정확도로 위 정보들을 예측해냈다. 즉, 디코더 결과물과 상관없이 $z$에는 이미 정보가 완벽히 들어있다."
-\end{itemize}
+Our results reveal that the MLP can predict the underlying game state with astonishing accuracy. Specifically, it achieved \todo{화면 하단 잠수부 개수 분류 정확도 수치 (예: 99.5\%)} accuracy for counting the number of divers at the bottom, \todo{화면 상 잠수부 존재 여부 분류 정확도 수치} accuracy for detecting the presence of a diver on screen, and a mean squared error of \todo{x,y 좌표 예측 오차 수치} for predicting the exact $(x, y)$ coordinates of the diver. This confirms that the latent space already encapsulates perfect semantic information, irrespective of the decoder's visual output.
 
 \subsection{Robustness to Spatial Noise: Refuting the Blurring Hypothesis}
-\textbf{- [해야 할 실험 결과 삽입]}
+Recent works advocating for Diffusion models \todo{DIAMOND 논문 인용} hypothesize that standard encoders fail because they "blur" or entangle spatial information. To refute this, we injected heavy random noise into the background spaces of the original images, leaving only the diver's position intact.
 
-\begin{itemize}
-\item 반박 대상: DIAMOND 등의 최신 Diffusion 모델 논문들이 주장하는 "기존 인코더는 정보가 뭉개지거나(blurr) 위치 정보가 섞인다"는 가설.
-\end{itemize}
-\begin{itemize}
-\item 방법: 원본 이미지에서 잠수부 위치만 그대로 두고, 배경 등 나머지 공간에 랜덤 노이즈를 강하게 주입하여 인코더에 통과시킴.
-\end{itemize}
-\begin{itemize}
-\item 논리: 만약 DIAMOND의 주장대로 잠수부의 정보가 화면의 다른 위치 공간과 섞이거나(blurr) 뭉개졌다면, 다른 위치에 주입된 극심한 노이즈로 인해 잠수부를 검출하는 능력이 크게 훼손되어야 함.
-\end{itemize}
-\begin{itemize}
-\item 결과: "이 상태로 인코딩한 $z$로도 여전히 잠수부의 위치와 개수를 정확히 맞춘다. 이는 인코더가 공간적 정보를 섞지 않고 핵심 객체의 특징을 강건하게(robustly) 분리(disentangle)해내는 능력이 이미 있음을 증명하며, 기존 모델들의 실패 원인이 Blurring 때문이라는 주장을 완벽히 논파한다."
-\end{itemize}
+If the blurring hypothesis were true, the extreme noise in other spatial locations would entangle with the diver's features, degrading the probing accuracy. However, our probing MLP, taking the noise-injected $z$ as input, still maintained \todo{노이즈 주입 후 유지된 잠수부 위치/개수 정확도 수치} accuracy. This demonstrates that the encoder possesses robust disentanglement capabilities, completely debunking the claim that spatial blurring is the root cause of RL failures.
 
 \section{Identifying the Real Bottleneck: Actor-Critic Optimization}
-\textbf{[작성 가이드: 진짜 병목이 Actor-Critic에 있음을 주장하는 섹션]}
+\label{sec:bottleneck}
 
 \subsection{High Variance Across Random Seeds}
-\textbf{- [해야 할 실험 결과 삽입]}
+If representation learning were fundamentally flawed, the agent would universally fail to learn. However, we observe extreme variance in performance across different random seeds.
 
-\begin{itemize}
-\item 기존 모델을 여러 시드로 돌렸을 때 성능이 천차만별로 튀는 그래프(분산 밴드가 넓은 그래프) 삽입.
-\end{itemize}
-\begin{itemize}
-\item "만약 Representation 학습 자체가 문제였다면 시드와 무관하게 아예 학습이 불가능해야 한다. 하지만 어떤 시드에서는 성공하고 어떤 시드에서는 실패한다는 것은, RL 본연의 Policy/Q-value 최적화 과정이 매우 불안정하다는 증거다."
-\end{itemize}
+\begin{figure}[h]
+\centering
+\todo{여러 시드로 돌렸을 때 성능 편차가 매우 큼을 보여주는 그래프 이미지 삽입}
+\caption{\todo{시드별 성능 편차 그래프를 설명하는 캡션. Actor-Critic 최적화의 불안정성을 강조.}}
+\label{fig:seed_variance}
+\end{figure}
+
+As shown in Figure~\ref{fig:seed_variance}, the agent succeeds in some seeds and fails entirely in others. This highly stochastic outcome is a classic hallmark of unstable policy and value function optimization in RL, strongly indicating that the bottleneck lies in the Actor-Critic training dynamics rather than the representation.
 
 \subsection{The Challenge of Sparse Rewards and Credit Assignment}
-\begin{itemize}
-\item 환경의 특성 분석: Seaquest는 6명의 잠수부를 모으고 수면으로 올라가야만 보상이 주어지는 극단적 지연 보상(Extreme Delayed Reward) 환경.
-\end{itemize}
-\begin{itemize}
-\item "따라서 문제는 인코딩이 아니라, 탐험(Exploration) 과정에서 얻어걸린 드문 보상을 과거의 수많은 행동들에 제대로 할당(Credit Assignment)하지 못하는 Actor-Critic 구조의 한계다."
-\end{itemize}
+The Seaquest environment requires the agent to collect six divers and surface to receive a reward—an extreme case of delayed and sparse feedback. In such scenarios, the agent may occasionally stumble upon a reward during random exploration. The true challenge is the credit assignment problem: successfully attributing this rare reward to the long sequence of past actions. Traditional Actor-Critic architectures struggle to propagate this sparse signal effectively, leading to the observed failures.
 
-\section{Proposed Method: Efficient Episodic Retrieval for Actor-Critic}
-\textbf{[작성 가이드: 제안하는 기법 상세 설명]}
+\section{Proposed Method: FLASH (Fast Latent Anchor Search with Hashing)}
+\label{sec:method}
 
-\subsection{Episodic Memory and Retrieval Mechanism}
-\begin{itemize}
-\item "이 불안정한 Actor-Critic 최적화를 돕기 위해 무거운 Diffusion을 쓰는 대신, 가벼운 검색(Retrieval) 메커니즘을 도입한다."
-\end{itemize}
-\begin{itemize}
-\item [수식 및 알고리즘 설명 삽입] 어떻게 과거 에피소드의 정보를 저장하고 탐색하여 적용하는지 명확히 서술.
-\end{itemize}
+To overcome the Actor-Critic bottleneck without resorting to computationally expensive generative models, we introduce FLASH.
 
-\subsection{Curriculum Activation (Optional / Heuristics)}
-\begin{itemize}
-\item 언제 Retrieval을 활성화할 것인지에 대한 전략 설명.
-\end{itemize}
-\begin{itemize}
-\item 방법 1 (고정): 20,000 스텝 등 일정 수준 월드 모델이 안정화된 이후 활성화.
-\end{itemize}
-\begin{itemize}
-\item 방법 2 (적응형): '근처 3개 에피소드 중 최댓값'의 증가 속도가 급격히 폭증하는 스텝부터 활성화. (논문에서는 베이스라인을 고정 스텝으로 잡고, 적응형은 부가적으로 설명하는 것을 추천)
-\end{itemize}
+\subsection{Episodic Memory and Retrieval with FLASH}
+Instead of relying solely on parametric gradient updates, we store successful episodic trajectories and retrieve them to directly regularize or guide the Actor-Critic updates.
+
+\todo{여기에 경험을 저장하고 탐색하여 적용하는 방식에 대한 구체적인 수식(Math Equations)과 알고리즘 단계들을 영어로 상세히 작성해주세요. 어떻게 \$Q\$-value나 Policy update에 검색된 경험이 반영되는지 명시해야 합니다.}
+
+\subsection{Curriculum Activation}
+Retrieving episodes too early during training, when the world model and representations are still highly unstable, can introduce noisy signals. Therefore, we employ a curriculum activation strategy.
+
+\todo{언제 Retrieval을 활성화하는지 구체적인 스텝 수(예: 20,000 스텝)나 '근처 3개 에피소드 중 최댓값 증가 속도'를 측정하는 정확한 기준 및 수식을 영어로 적어주세요.}
 
 \section{Experiments}
-\textbf{[작성 가이드: 실험 결과를 통한 증명. Seaquest의 근본적 한계와 Frostbite에서의 성공을 대조하는 것이 핵심.]}
+\label{sec:experiments}
 
 \subsection{Experimental Setup}
-\begin{itemize}
-\item 타겟 게임들: Seaquest (극한의 지연 보상), Frostbite (부분 보상이 있는 덜 극한의 환경) 및 기타 Atari 환경들.
-\end{itemize}
+We evaluate our method on the Atari 100k benchmark, focusing particularly on Seaquest (representing extreme delayed rewards) and Frostbite (representing partial, dense rewards) to analyze the impact of different reward structures.
 
-\subsection{Main Performance: The Impact on Different Reward Structures}
-\textbf{- [해야 할 실험 결과 삽입]}
+\subsection{Main Performance}
+Table~\ref{tab:main_performance} presents the comprehensive Atari 100k results. 
 
 \begin{table}[h]
 \centering
-\caption{Atari 100k Benchmark Performance. 기존 모델(STORM, DRAMA, EDELINE)과 당사의 기법(+ours)을 적용했을 때의 성능 비교.}
+\caption{Atari 100k Benchmark Performance. \todo{아래 표의 STORM, DRAMA, EDELINE 및 +ours 열에 실제 실험 점수 데이터를 모두 채워넣어 주세요.}}
 \label{tab:main_performance}
 \resizebox{\textwidth}{!}{
 \begin{tabular}{lrrrrrrrr}
 \toprule
 Game & Random & Human & STORM & STORM+ours & DRAMA & DRAMA+ours & EDELINE & EDELINE+ours \\
 \midrule
-Alien         & 227.8 & 7127.7 & - & - & - & - & - & - \\
-Amidar        & 5.8 & 1719.5 & - & - & - & - & - & - \\
-Assault       & 222.4 & 742.0 & - & - & - & - & - & - \\
-Asterix       & 210.0 & 8503.3 & - & - & - & - & - & - \\
-BankHeist     & 14.2 & 753.1 & - & - & - & - & - & - \\
-BattleZone    & 2360.0 & 37187.5 & - & - & - & - & - & - \\
-Boxing        & 0.1 & 12.1 & - & - & - & - & - & - \\
-Breakout      & 1.7 & 30.5 & - & - & - & - & - & - \\
-ChopperCommand & 811.0 & 7387.8 & - & - & - & - & - & - \\
-CrazyClimber  & 10780.5 & 35829.4 & - & - & - & - & - & - \\
-DemonAttack   & 152.1 & 1971.0 & - & - & - & - & - & - \\
-Freeway       & 0.0 & 29.6 & - & - & - & - & - & - \\
-Frostbite     & 65.2 & 4334.7 & - & - & - & - & - & - \\
-Gopher        & 257.6 & 2412.5 & - & - & - & - & - & - \\
-Hero          & 1027.0 & 30826.4 & - & - & - & - & - & - \\
-Jamesbond     & 29.0 & 302.8 & - & - & - & - & - & - \\
-Kangaroo      & 52.0 & 3035.0 & - & - & - & - & - & - \\
-Krull         & 1598.0 & 2665.5 & - & - & - & - & - & - \\
-KungFuMaster  & 258.5 & 22736.3 & - & - & - & - & - & - \\
-MsPacman      & 307.3 & 6951.6 & - & - & - & - & - & - \\
-Pong          & -20.7 & 14.6 & - & - & - & - & - & - \\
-PrivateEye    & 24.9 & 69571.3 & - & - & - & - & - & - \\
-Qbert         & 163.9 & 13455.0 & - & - & - & - & - & - \\
-RoadRunner    & 11.5 & 7845.0 & - & - & - & - & - & - \\
-Seaquest      & 68.4 & 42054.7 & - & - & - & - & - & - \\
-UpNDown       & 533.4 & 11693.2 & - & - & - & - & - & - \\
+Alien         & 227.8 & 7127.7 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+Amidar        & 5.8 & 1719.5 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+Assault       & 222.4 & 742.0 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+Asterix       & 210.0 & 8503.3 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+BankHeist     & 14.2 & 753.1 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+BattleZone    & 2360.0 & 37187.5 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+Boxing        & 0.1 & 12.1 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+Breakout      & 1.7 & 30.5 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+ChopperCommand & 811.0 & 7387.8 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+CrazyClimber  & 10780.5 & 35829.4 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+DemonAttack   & 152.1 & 1971.0 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+Freeway       & 0.0 & 29.6 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+Frostbite     & 65.2 & 4334.7 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+Gopher        & 257.6 & 2412.5 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+Hero          & 1027.0 & 30826.4 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+Jamesbond     & 29.0 & 302.8 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+Kangaroo      & 52.0 & 3035.0 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+Krull         & 1598.0 & 2665.5 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+KungFuMaster  & 258.5 & 22736.3 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+MsPacman      & 307.3 & 6951.6 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+Pong          & -20.7 & 14.6 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+PrivateEye    & 24.9 & 69571.3 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+Qbert         & 163.9 & 13455.0 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+RoadRunner    & 11.5 & 7845.0 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+Seaquest      & 68.4 & 42054.7 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+UpNDown       & 533.4 & 11693.2 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
 \midrule
-\#Superhuman ($\uparrow$) & 0 & N/A & - & - & - & - & - & - \\
-Mean ($\uparrow$) & 0.000 & 1.000 & - & - & - & - & - & - \\
-Median ($\uparrow$) & 0.000 & 1.000 & - & - & - & - & - & - \\
-IQM ($\uparrow$) & 0.000 & 1.000 & - & - & - & - & - & - \\
-Optimality Gap ($\downarrow$) & 1.000 & 0.000 & - & - & - & - & - & - \\
+\#Superhuman ($\uparrow$) & 0 & N/A & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+Mean ($\uparrow$) & 0.000 & 1.000 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+Median ($\uparrow$) & 0.000 & 1.000 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+IQM ($\uparrow$) & 0.000 & 1.000 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+Optimality Gap ($\downarrow$) & 1.000 & 0.000 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
 \bottomrule
 \end{tabular}
 }
 \end{table}
 
-\begin{itemize}
-\item 1. Frostbite 결과: "부분 보상이 있는 환경에서는 우리의 기법이 Actor-Critic 병목을 완벽히 해소하며 성능이 폭발적으로 상승함."
-\end{itemize}
-\begin{itemize}
-\item 2. Seaquest 결과: "성능 향상이 제한적이나, 이는 기법의 실패가 아니라 '탐험(Exploration)' 문제의 근본적인 어려움 때문임."
-\end{itemize}
-\begin{itemize}
-\item 결론: "우리의 기법이 강화학습의 최적화 과정을 크게 안정화시킴을 입증."
-\end{itemize}
+In environments with partial rewards like Frostbite, our method completely resolves the Actor-Critic bottleneck, resulting in an explosive performance increase. In Seaquest, the performance gain is more bounded, which we attribute to the fundamental difficulty of exploration itself rather than a failure of our exploitation mechanism. Overall, the results prove that our approach significantly stabilizes the RL optimization process.
 
 \subsection{Amplification of Successful Exploration}
-\textbf{- [해야 할 실험 결과 삽입]}
 
-\begin{itemize}
-\item 제안 기법을 적용했을 때, '탐험에 성공한 시드'의 평가 점수(Evaluate Score)가 폭발적으로 상승하는 현상을 보여주는 그래프 삽입.
-\end{itemize}
-\begin{itemize}
-\item 원인 분석 (Case 1): 15,000 스텝 이전에 800점 이상의 높은 에피소드 점수(Episode Score)를 한 번이라도 달성한 시드의 경우, 우리의 Retrieval 기법이 이를 강력하게 Exploitation(활용)하여 평가 점수(Evaluate Score)를 대폭 끌어올림 (Episode Score의 최댓값에 수렴함).
-\end{itemize}
-\begin{itemize}
-\item 원인 분석 (Case 2): 반면 300점을 넘지 못하는 등 '탐험에 완전히 실패한 시드'의 경우, 검색해서 활용할 양질의 과거 경험이 없으므로 성능 향상이 발생하지 않음.
-\end{itemize}
-\begin{itemize}
-\item 결론: "우리의 기법은 하드코어 탐험(Exploration) 문제를 직접 해결하는 것이 아니라, 우연히 발견된 희소 보상(Sparse Reward)을 \textbf{단 하나도 놓치지 않고 최적의 정책(Optimal Policy)으로 흡수해 내는 강력한 'Exploitation Amplifier' 역할}을 수행함을 입증한다."
-\end{itemize}
+\begin{figure}[h]
+\centering
+\todo{성공적인 탐험 시드가 평가 점수를 대폭 끌어올리는 현상을 보여주는 그래프 이미지 삽입}
+\caption{\todo{탐험에 성공한 시드의 평가 점수(Evaluate Score) 상승 폭을 보여주는 캡션 작성.}}
+\label{fig:exploitation_amplifier}
+\end{figure}
+
+A key property of FLASH is its ability to act as an "Exploitation Amplifier." As shown in Figure~\ref{fig:exploitation_amplifier}, if a seed manages to achieve a high episode score (e.g., $>800$) even once during early exploration, our method aggressively exploits this trajectory, pulling the overall evaluation score up to converge near the maximum achieved episode score. Conversely, for seeds that completely fail to explore (e.g., $<300$ points), there are no high-quality past experiences to retrieve, resulting in no artificial performance gain. This demonstrates that FLASH does not magically solve hardcore exploration, but ensures that rare, successful exploratory signals are never lost and are optimally absorbed by the policy.
 
 \subsection{Computational Efficiency: Negligible Overhead}
-\textbf{- [해야 할 실험/분석 결과 삽입]}
+Unlike diffusion-based methods that introduce massive overhead, FLASH is exceedingly lightweight. 
 
+The algorithmic time complexity is as follows:
 \begin{itemize}
-\item 제안하는 Retrieval 기법을 기존 모델(예: Edeline 등 Diffusion 기반 모델)에 추가했을 때 발생하는 추가 연산량(Overhead) 분석.
-\end{itemize}
-\begin{itemize}
-\item 알고리즘의 세부 시간 복잡도(Time Complexity) 분석 명시: 
-    \begin{itemize}
-    \item 매 프레임 삽입(Insertion per frame) 복잡도: $O(\text{[채워넣기]})$
-    \item Global Rebuild 발생 시 복잡도: $O(\text{[채워넣기]})$
-    \item 이런 식으로 검색 시나 그런 거 각각의 시간복잡도 적어두기
-    \end{itemize}
-\end{itemize}
-\begin{itemize}
-\item 위 이론적 복잡도를 바탕으로, 기법 추가 전후의 총 학습 시간이나 FPS(Frames Per Second) 차이를 실제 측정하여 비교.
-\end{itemize}
-\begin{itemize}
-\item "본 기법은 Actor-Critic의 치명적인 병목을 뚫어내어 막대한 성능 향상을 이끌어내면서도, 추가 연산량이 거의 0에 수렴하는 매우 가볍고(Lightweight) 효율적인 플러그인(Plug-in) 기법이다." (이를 증명하는 표 필수)
+    \item Insertion per frame: $\mathcal{O}(\todo{여기에 삽입 시간복잡도 수식 입력})$
+    \item Global Rebuild: $\mathcal{O}(\todo{여기에 Rebuild 시간복잡도 수식 입력})$
+    \item Retrieval step: $\mathcal{O}(\todo{여기에 검색 시간복잡도 수식 입력})$
 \end{itemize}
 
-\subsection{Train vs. Evaluation Performance Gap (Discussion)}
-\textbf{- [해야 할 실험 결과 삽입]}
+\begin{table}[h]
+\centering
+\caption{\todo{기존 모델과 제안 기법(+ours)의 초당 프레임 처리량(FPS) 또는 총 학습 시간(Training Time)을 비교하는 표를 여기에 직접 만들어주세요.}}
+\label{tab:efficiency}
+\end{table}
 
-\begin{itemize}
-\item 학습 중 에피소드 스코어는 낮게 유지되지만, 평가(Evaluation) 스코어는 월등히 높은 현상 분석.
-\end{itemize}
-\begin{itemize}
-\item "이는 에이전트가 탐험(Exploration)을 위해 무작위성이 추가된 Sub-optimal 궤적들을 수집하는 와중에도, 우리의 기법이 해당 경험들로부터 최적의 정책(Optimal Policy)을 성공적으로 분리하여 최적화해 냈음을 입증하는 강력한 증거이다."
-\end{itemize}
+Table~\ref{tab:efficiency} shows the empirical FPS measurements. FLASH delivers massive performance gains by unblocking the Actor-Critic bottleneck while keeping the additional computational overhead practically near zero.
+
+\subsection{Train vs. Evaluation Performance Gap}
+
+\begin{figure}[h]
+\centering
+\todo{Train 점수는 낮지만 Evaluation 점수는 월등히 높은 현상을 보여주는 그래프 삽입}
+\caption{\todo{Train과 Evaluation 스코어 갭을 보여주는 캡션 작성.}}
+\label{fig:train_eval_gap}
+\end{figure}
+
+During training, the episode score often remains relatively low due to the inherent randomness required for exploration. However, the evaluation score skyrockets. This disparity, illustrated in Figure~\ref{fig:train_eval_gap}, provides strong evidence that FLASH effectively filters and extracts the optimal policy from the noisy, sub-optimal trajectories collected during exploration.
 
 \section{Conclusion}
-\textbf{[작성 가이드: 결론]}
-
-\begin{itemize}
-\item "Representation의 시각적 품질에 집착하는 현 트렌드를 비판하고, 진짜 병목인 Actor-Critic 최적화 문제를 저비용 고효율로 해결했다."
-\end{itemize}
-
-
+\label{sec:conclusion}
+In this paper, we critique the recent trend of obsessing over visual representation quality in RL. We demonstrate that existing lightweight encoders already possess sufficient capacity. By pinpointing the Actor-Critic optimization as the true bottleneck, we proposed FLASH, an efficient and low-overhead retrieval method. Our approach successfully amplifies rare exploratory successes, matching or surpassing heavy diffusion-based models while maintaining extreme computational efficiency.
 
 \bibliography{iclr2027_conference}
 \bibliographystyle{iclr2027_conference}
 
 \appendix
 \section{Appendix}
-You may include other additional sections here.
-
+\todo{추가적인 실험 결과나 하이퍼파라미터 세팅 등을 이 곳에 적어주세요.}
 
 \end{document}
