@@ -34,7 +34,7 @@
 \maketitle
 
 \begin{abstract}
-Recent advancements in Reinforcement Learning (RL) have heavily adopted World Models and Diffusion-based techniques; however, they often suffer from prohibitive computational costs. In this paper, we first debunk the prevailing myth that the performance bottleneck of existing models lies in their representation capacity (e.g., poor image reconstruction). Through rigorous probing and analysis, we demonstrate that existing lightweight encoders already capture sufficient and robust object-level information, contrary to recent claims of spatial blurring. We reveal that the true bottleneck resides in the optimization process of the Actor-Critic architecture, particularly its high variance and inefficiency in handling extreme delayed rewards during exploration. To address this, we propose FLASH (Fast Latent Anchor Search with Hashing), a lightweight and efficient mechanism that directly aids Actor-Critic optimization without relying on computationally heavy diffusion processes. Our method achieves performance comparable to or exceeding state-of-the-art methods while operating at significantly higher frames per second (FPS). Crucially, our approach acts as a powerful "Exploitation Amplifier," maximizing the evaluation scores of seeds that successfully explore sparse rewards, all with negligible computational overhead.
+Recent advancements in Reinforcement Learning (RL) have heavily adopted World Models and Diffusion-based techniques; however, they often suffer from prohibitive computational costs. In this paper, we first investigate the common assumption that the performance bottleneck of existing models lies primarily in their representation capacity (e.g., poor image reconstruction). Through rigorous probing analysis, we provide evidence suggesting that existing lightweight encoders can already capture robust object-level information. This implies that representation capacity may not be the sole limitation, prompting us to investigate other structural candidates. Among these, we identify the optimization process of the Actor-Critic architecture as a major, independent bottleneck, characterized by extreme performance variance across different random seeds. To mitigate this specific issue, we propose FLASH (Fast Latent Anchor Search with Hashing), a lightweight and efficient plug-and-play module that directly aids Actor-Critic optimization. By seamlessly integrating into various RL baselines—ranging from lightweight encoder-based models to heavy diffusion-based models—FLASH elevates their performance significantly while preserving their original frames per second (FPS). Crucially, our approach acts as a powerful "Exploitation Amplifier," maximizing the evaluation scores of seeds that successfully explore, all with negligible computational overhead.
 \end{abstract}
 
 \section{Introduction}
@@ -42,12 +42,12 @@ Recent advancements in Reinforcement Learning (RL) have heavily adopted World Mo
 
 Recently, the integration of Diffusion models into Reinforcement Learning (RL) has become increasingly popular, yielding strong performance in various benchmarks \todo{DIAMOND 등 Diffusion 기반 RL 최신 논문 인용}. However, this trend has brought about a significant drawback: massive computational costs and high latency during both training and inference. This raises a fundamental question: \textit{Are these heavy computational overheads truly necessary, or are we addressing the wrong bottleneck?}
 
-In this work, we argue that the current focus on enhancing representation quality through heavy generative models may be misguided. By observing the extreme performance variance across different random seeds in standard RL setups, we hypothesize that the primary issue is not the lack of representative power, but rather the inherent instability in the Actor-Critic optimization process. 
+In this work, we suggest that the current singular focus on enhancing representation quality through heavy generative models may overlook other critical components of the RL pipeline. By observing extreme performance variance across different random seeds in standard setups, we hypothesize that the inherent instability in the Actor-Critic optimization process itself constitutes a major, independent bottleneck. 
 
 Our contributions are threefold:
-First, we analytically prove the sufficiency of existing lightweight representations. We demonstrate that poor visual reconstruction does not equate to a loss of underlying semantic information.
-Second, we identify and highlight the Actor-Critic optimization—specifically the difficulty of credit assignment in environments with sparse and delayed rewards—as the actual bottleneck hindering RL performance.
-Finally, we propose FLASH, an efficient retrieval mechanism that augments the Actor-Critic architecture. By effectively storing and retrieving past experiences, our method stabilizes learning and acts as a powerful exploitation amplifier for successful exploration, achieving state-of-the-art results with minimal computational overhead.
+First, we provide analytical evidence suggesting the sufficiency of existing lightweight representations in certain environments, demonstrating that poor visual reconstruction does not necessarily equate to a loss of underlying semantic information.
+Second, having established that representations are not the sole limitation, we identify the Actor-Critic optimization process as a distinct and major bottleneck hindering RL performance, evidenced by extreme seed-to-seed variance.
+Finally, to mitigate this specific optimization bottleneck, we propose FLASH, an efficient retrieval mechanism that augments the Actor-Critic architecture. By effectively identifying and retrieving pivotal past experiences, our method stabilizes learning and acts as a powerful exploitation amplifier, achieving state-of-the-art results with minimal computational overhead.
 
 \section{Related Work}
 \label{sec:related}
@@ -91,7 +91,7 @@ Recent works advocating for Diffusion models \todo{DIAMOND 논문 인용} hypoth
 
 If the blurring hypothesis were true, the extreme noise in other spatial locations would entangle with the diver's features, degrading the probing accuracy. However, our probing MLP, taking the noise-injected $z$ as input, still maintained \todo{노이즈 주입 후 유지된 잠수부 위치/개수 정확도 수치} accuracy. This demonstrates that the encoder possesses robust disentanglement capabilities, completely debunking the claim that spatial blurring is the root cause of RL failures.
 
-\section{Identifying the Real Bottleneck: Actor-Critic Optimization}
+\section{Beyond Representations: The Actor-Critic Optimization Bottleneck}
 \label{sec:bottleneck}
 
 \subsection{High Variance Across Random Seeds}
@@ -104,15 +104,15 @@ If representation learning were fundamentally flawed, the agent would universall
 \label{fig:seed_variance}
 \end{figure}
 
-As shown in Figure~\ref{fig:seed_variance}, the agent succeeds in some seeds and fails entirely in others. This highly stochastic outcome is a classic hallmark of unstable policy and value function optimization in RL, strongly indicating that the bottleneck lies in the Actor-Critic training dynamics rather than the representation.
+As shown in Figure~\ref{fig:seed_variance}, the agent succeeds in some seeds and fails entirely in others. This highly stochastic outcome is a classic hallmark of unstable policy and value function optimization in RL, strongly indicating that the Actor-Critic training dynamics present a distinct and major bottleneck independent of representation capacity.
 
-\subsection{The Challenge of Sparse Rewards and Credit Assignment}
-The Seaquest environment requires the agent to collect six divers and surface to receive a reward—an extreme case of delayed and sparse feedback. In such scenarios, the agent may occasionally stumble upon a reward during random exploration. The true challenge is the credit assignment problem: successfully attributing this rare reward to the long sequence of past actions. Traditional Actor-Critic architectures struggle to propagate this sparse signal effectively, leading to the observed failures.
+\subsection{The Challenge of Delayed Rewards and Value Spikes}
+Environments like Seaquest or Frostbite often require the agent to complete complex sub-goals (e.g., collecting multiple divers or building an igloo) before receiving a massive reward. In such scenarios, the agent may occasionally stumble upon a breakthrough during random exploration, causing a sudden, massive spike in the true state value. Traditional Actor-Critic architectures struggle to efficiently stabilize and learn from these rare, high-variance value spikes, often losing the critical exploratory signal in the noise of standard transitions.
 
 \section{Proposed Method: FLASH (Fast Latent Anchor Search with Hashing)}
 \label{sec:method}
 
-To overcome the Actor-Critic bottleneck without resorting to computationally expensive generative models, we introduce FLASH.
+To directly address the fundamental bottleneck in Actor-Critic optimization, we introduce FLASH.
 
 \subsection{Episodic Memory and Retrieval with FLASH}
 Instead of relying solely on parametric gradient updates, we store successful episodic trajectories and retrieve them to directly regularize or guide the Actor-Critic updates.
@@ -179,7 +179,7 @@ Optimality Gap ($\downarrow$) & 1.000 & 0.000 & \todo{?} & \todo{?} & \todo{?} &
 }
 \end{table}
 
-In environments with partial rewards like Frostbite, our method completely resolves the Actor-Critic bottleneck, resulting in an explosive performance increase. In Seaquest, the performance gain is more bounded, which we attribute to the fundamental difficulty of exploration itself rather than a failure of our exploitation mechanism. Overall, the results prove that our approach significantly stabilizes the RL optimization process.
+In environments featuring distinct sub-goals and episodic rewards like Frostbite, Asterix, and Qbert, FLASH successfully captures rare value spikes, resulting in an explosive performance increase. Conversely, in environments characterized by dense, continuous rewards or pure long-horizon exploration (e.g., MsPacman, Seaquest), the performance gain is more bounded. This perfectly aligns with our design: FLASH specifically mitigates the Actor-Critic bottleneck associated with sudden positive value shifts (breakthroughs), but does not artificially solve fundamental exploration challenges or alter dense-reward dynamics. Overall, the results prove that our approach significantly stabilizes the RL optimization process where value-spike bottlenecks exist.
 
 \subsection{Amplification of Successful Exploration}
 
@@ -193,7 +193,7 @@ In environments with partial rewards like Frostbite, our method completely resol
 A key property of FLASH is its ability to act as an "Exploitation Amplifier." As shown in Figure~\ref{fig:exploitation_amplifier}, if a seed manages to achieve a high episode score (e.g., $>800$) even once during early exploration, our method aggressively exploits this trajectory, pulling the overall evaluation score up to converge near the maximum achieved episode score. Conversely, for seeds that completely fail to explore (e.g., $<300$ points), there are no high-quality past experiences to retrieve, resulting in no artificial performance gain. This demonstrates that FLASH does not magically solve hardcore exploration, but ensures that rare, successful exploratory signals are never lost and are optimally absorbed by the policy.
 
 \subsection{Computational Efficiency: Negligible Overhead}
-Unlike diffusion-based methods that introduce massive overhead, FLASH is exceedingly lightweight. 
+Because FLASH focuses solely on optimizing the Actor-Critic training rather than modifying the heavy representation models, it adds practically zero computational burden to the base model. 
 
 The algorithmic time complexity is as follows:
 \begin{itemize}
@@ -223,7 +223,7 @@ During training, the episode score often remains relatively low due to the inher
 
 \section{Conclusion}
 \label{sec:conclusion}
-In this paper, we critique the recent trend of obsessing over visual representation quality in RL. We demonstrate that existing lightweight encoders already possess sufficient capacity. By pinpointing the Actor-Critic optimization as the true bottleneck, we proposed FLASH, an efficient and low-overhead retrieval method. Our approach successfully amplifies rare exploratory successes, matching or surpassing heavy diffusion-based models while maintaining extreme computational efficiency.
+In this paper, we critique the recent trend of obsessing over visual representation quality in RL. We demonstrate that existing lightweight encoders already possess sufficient capacity. By shifting focus to the Actor-Critic optimization process as a major, independent bottleneck, we proposed FLASH, an efficient and low-overhead retrieval method. Our plug-and-play approach successfully amplifies rare exploratory successes and universally elevates the performance of existing RL baselines—including both lightweight and heavy diffusion-based models—while maintaining extreme computational efficiency.
 
 \bibliography{iclr2027_conference}
 \bibliographystyle{iclr2027_conference}
