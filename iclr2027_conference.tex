@@ -73,20 +73,20 @@ As qualitative evidence, we observe the \textit{temporal persistence of objects}
 \centering
 \begin{minipage}{0.32\textwidth}
   \centering
-  \includegraphics[width=\linewidth]{reconstruction/frame_0061.png}\\
+  \includegraphics[width=\linewidth]{reconstruction/frame_0061_marked.png}\\
   (a) $t$ (Clear)
 \end{minipage}\hfill
 \begin{minipage}{0.32\textwidth}
   \centering
-  \includegraphics[width=\linewidth]{reconstruction/frame_0062.png}\\
+  \includegraphics[width=\linewidth]{reconstruction/frame_0062_marked.png}\\
   (b) $t+1$ (Blurry)
 \end{minipage}\hfill
 \begin{minipage}{0.32\textwidth}
   \centering
-  \includegraphics[width=\linewidth]{reconstruction/frame_0063.png}\\
+  \includegraphics[width=\linewidth]{reconstruction/frame_0063_marked.png}\\
   (c) $t+2$ (Clear)
 \end{minipage}
-\caption{Temporal persistence of objects during the open-loop imagination phase. At time $t$ and $t+2$, the fish is clearly rendered. However, at $t+1$, the fish temporarily blurs. Since this sequence is purely imagined without external observations, the perfect reappearance at $t+2$ proves that the fish's ontological information was preserved in the latent state throughout, and the blurriness was merely a decoder rendering failure.}
+\caption{Temporal persistence of objects during the open-loop imagination phase. At time $t$ and $t+2$, the fish is clearly rendered. However, at $t+1$, the fish temporarily blurs. Since this sequence is purely imagined without external observations, the perfect reappearance at $t+2$ proves that the fish's ontological information was preserved in the latent state throughout, and the blurriness was merely a decoder rendering failure. Yellow circles highlight the target fish.}
 \label{fig:temporal_persistence}
 \end{figure}
 
@@ -111,17 +111,17 @@ To formally investigate whether the encoder successfully captures functionally c
 \label{fig:heatmaps}
 \end{figure}
 
-As shown in Figure~\ref{fig:heatmaps}, both heatmaps reveal distinct structural patterns rather than a uniform similarity of 1.0. For the diver count (left), states with adjacent counts exhibit high similarity (ranging from $0.93$ to $0.98$), but the relationship is non-linear for larger differences. For instance, when comparing 0 divers to $n$ divers, the similarity drops to a minimum of $0.86$ at $n=3$, before slightly recovering to $0.90$ at $n=6$. Similarly, for the diver's spatial position (right), we fixed the submarine in the center of the screen and moved a single diver from the far left edge to just left of the submarine. As the diver's position shifts, the latent similarity degrades, dropping down to $0.63$ at the maximum displacement. If the lightweight encoder had completely ignored these small, static elements, all latent states would be identical (similarity of 1.0). The fact that the similarities dynamically and distinctly reflect the underlying game state provides a strong clue that the encoder successfully detects and maps these critical static features into the latent space, motivating our subsequent probing analysis.
+As shown in Figure~\ref{fig:heatmaps}, both heatmaps reveal distinct structural patterns rather than a uniform similarity of 1.0. For the diver count (left), states with similar counts exhibit high cosine similarity ($0.93$--$0.98$), while states with larger count differences drop as low as $0.86$. For the diver position (right), we fixed the submarine at the center and moved a single diver from the far left edge to just left of the submarine; as displacement increases, the similarity degrades down to $0.63$. If the encoder had ignored these small, static elements, all similarities would be 1.0. The fact that they dynamically reflect the underlying game state provides a strong clue that the encoder maps these critical features into the latent space, motivating our subsequent probing analysis.
 
 \subsection{Probing the Latent Space}
 To verify exactly what information the latent state $z$ contains, we conducted a probing experiment on the Seaquest environment, known for its extreme sparse rewards and tiny objects. We detached the pre-trained encoder (stopping gradient flow) and trained a lightweight MLP to predict ground-truth RAM states directly from $z$.
 
-Our results reveal that the MLP can predict the underlying game state with astonishing accuracy. Specifically, it achieved \todo{화면 하단 잠수부 개수 분류 정확도 수치 (예: 99.5\%)} accuracy for counting the number of divers at the bottom, \todo{화면 상 잠수부 존재 여부 분류 정확도 수치} accuracy for detecting the presence of a diver on screen, and a mean squared error of \todo{x,y 좌표 예측 오차 수치} for predicting the exact $(x, y)$ coordinates of the diver. This confirms that the latent space already encapsulates perfect semantic information, irrespective of the decoder's visual output.
+Our results reveal that the MLP can predict the underlying game state with astonishing accuracy. Specifically, it achieved \todo{화면 하단 잠수부 개수 분류 정확도 수치} accuracy for counting the number of divers at the bottom, \todo{화면 상 잠수부 존재 여부 분류 정확도 수치} accuracy for detecting the presence of a diver on screen, and a mean squared error of \todo{x,y 좌표 예측 오차 수치} for predicting the exact $(x, y)$ coordinates of the diver. This confirms that the latent space already encapsulates perfect semantic information, irrespective of the decoder's visual output.
 
 \subsection{Robustness to Spatial Noise: Refuting the Blurring Hypothesis}
-Recent works advocating for Diffusion models \todo{DIAMOND 논문 인용} hypothesize that standard encoders fail because they "blur" or entangle spatial information. To refute this, we injected heavy random noise into the background spaces of the original images, leaving only the diver's position intact.
+Recent works advocating for Diffusion models \todo{DIAMOND 논문 인용} hypothesize that standard encoders fail because they blur or "entangle" spatial information. To refute this, we injected heavy random noise into the background spaces of the original images, leaving only the diver's position intact.
 
-If the blurring hypothesis were true, the extreme noise in other spatial locations would entangle with the diver's features, degrading the probing accuracy. However, our probing MLP, taking the noise-injected $z$ as input, still maintained \todo{노이즈 주입 후 유지된 잠수부 위치/개수 정확도 수치} accuracy. This demonstrates that the encoder possesses robust disentanglement capabilities, completely debunking the claim that spatial blurring is the root cause of RL failures.
+If the entanglement hypothesis were true, the extreme noise in other spatial locations would entangle with the diver's features, degrading the probing accuracy. However, our probing MLP, taking the noise-injected $z$ as input, still maintained \todo{노이즈 주입 후 유지된 잠수부 위치/개수 정확도 수치} accuracy. This demonstrates that the encoder possesses robust disentanglement capabilities, completely debunking the claim that spatial entanglement is the root cause of RL failures.
 
 \section{Beyond Representations: The Actor-Critic Optimization Bottleneck}
 \label{sec:bottleneck}
