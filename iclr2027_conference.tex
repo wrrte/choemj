@@ -67,12 +67,31 @@ Finally, to mitigate this specific optimization bottleneck, we propose FLASH, an
 \subsection{The Myth of Reconstruction Quality}
 A common fallacy in recent model-based RL research is the assumption that blurry decoded images imply a lack of information in the latent space. We argue that this is merely a rendering failure of the decoder.
 
-As qualitative evidence, we observe the \textit{temporal persistence of objects} during the \textbf{open-loop imagination phase} in models like DreamerV3 and Drama \todo{해당 논문 인용}. During this phase, the model predicts future states solely based on its internal transition dynamics, without access to real observations. For instance, when a submarine approaches a fish in an imagined trajectory, the fish may blur or disappear from the decoded frame at time $t$, only to reappear perfectly in its expected trajectory at time $t+1$. Since the model has no external input to "rediscover" the fish at $t+1$, this phenomenon definitively proves that the ontological information of the object was never lost in the latent state $z_t$; the transition model successfully propagated it to $z_{t+1}$, and it was simply a rendering failure of the decoder at time $t$. Therefore, relying on reconstruction quality is a deceptive metric for evaluating the true capacity of an encoder.
+As qualitative evidence, we observe the \textit{temporal persistence of objects} during the \textbf{open-loop imagination phase} in models like DreamerV3 and Drama \todo{해당 논문 인용}. During this phase, the model predicts future states solely based on its internal transition dynamics, without access to real observations. For instance, as shown in Figure~\ref{fig:temporal_persistence}, when a submarine approaches a fish in an imagined trajectory, the fish may blur or disappear from the decoded frame for several timesteps (e.g., $t+1, t+2$), only to reappear perfectly in its expected trajectory subsequently (e.g., $t+3$). Since the model has no external input to "rediscover" the fish at $t+3$, this phenomenon definitively proves that the ontological information of the object was never lost in the latent states; the transition model successfully propagated it through the sequence, and it was simply a rendering failure of the decoder. Therefore, relying on reconstruction quality is a deceptive metric for evaluating the true capacity of an encoder.
 
 \begin{figure}[h]
 \centering
-\todo{여기에 프레임 연속 캡처 사진(Sequence Figure)의 파일 경로를 넣어주세요. 예: \textbackslash includegraphics[width=0.8\textbackslash textwidth]\{figures/temporal\_persistence.pdf\}}
-\caption{\todo{캡션 설명 완성하기: $t$ 시점에서 디코더는 객체 렌더링에 실패하지만, $t+1$에서 제자리에 완벽히 복원되는 모습을 보여주는 Figure 설명.}}
+\begin{minipage}{0.24\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{reconstruction/frame_0049.png}\\
+  (a) $t$ (Clear)
+\end{minipage}\hfill
+\begin{minipage}{0.24\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{reconstruction/frame_0050.png}\\
+  (b) $t+1$ (Blurry)
+\end{minipage}\hfill
+\begin{minipage}{0.24\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{reconstruction/frame_0051.png}\\
+  (c) $t+2$ (Blurry)
+\end{minipage}\hfill
+\begin{minipage}{0.24\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{reconstruction/frame_0052.png}\\
+  (d) $t+3$ (Clear)
+\end{minipage}
+\caption{Temporal persistence of objects during the open-loop imagination phase. At time $t$ and $t+3$, the fish is clearly rendered. However, at $t+1$ and $t+2$, the fish temporarily blurs or disappears as the submarine approaches. Since this sequence is purely imagined without external observations, the perfect reappearance at $t+3$ proves that the fish's ontological information was preserved in the latent state throughout, and the blurriness was merely a decoder rendering failure.}
 \label{fig:temporal_persistence}
 \end{figure}
 
@@ -83,13 +102,13 @@ To formally investigate whether the encoder successfully captures functionally c
 \centering
 \begin{minipage}{0.48\textwidth}
   \centering
-  \includegraphics[width=\linewidth]{diver_count.jpg}
+  \includegraphics[width=\linewidth]{heatmap/diver_count.jpg}
   \caption{Cosine Similarity: Diver Count (0-6)}
   \label{fig:heatmap_count}
 \end{minipage}\hfill
 \begin{minipage}{0.48\textwidth}
   \centering
-  \includegraphics[width=\linewidth]{diver_location.jpg}
+  \includegraphics[width=\linewidth]{heatmap/diver_location.jpg}
   \caption{Cosine Similarity: Diver Position}
   \label{fig:heatmap_position}
 \end{minipage}
