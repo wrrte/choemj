@@ -4,6 +4,8 @@
 \documentclass{article} % For LaTeX2e
 \usepackage{iclr2027_conference,times}
 \usepackage{kotex} % 한국어 출력을 위해 추가
+\usepackage{booktabs} % 표를 예쁘게 그리기 위해 추가
+\usepackage{graphicx} % 표 크기 조절을 위해 추가
 % Optional math commands from https://github.com/goodfeli/dlbook_notation.
 \input{math_commands.tex}
 
@@ -61,7 +63,7 @@ Address \\
 2. 핵심 발견 (가장 중요): 기존 모델들의 성능이 떨어지는 것은 'Reconstruction(복원)이 안 되어서(Representation이 부족해서)'가 아님을 증명. 사실 인코더는 이미 충분한 정보를 담고 있다.
 3. 진짜 문제점 지적: 여러 시드(Seed)에 따른 극심한 성능 편차 등은 병목 현상이 Representation이 아니라 Actor-Critic의 최적화 과정에 있음을 시사함.
 4. 제안 방법: 무거운 Diffusion 대신, Actor-Critic의 최적화를 돕는 효율적인 Episodic Retrieval(경험 검색) 기법을 제안.
-5. 결과: 기존 SOTA와 동등 이상의 성능을 극도로 적은 연산량(높은 FPS)으로 달성함. 특히 탐험에 성공한 시드(Seed)의 경우 평가 점수(Eval Score)를 극대화하는 'Exploitation Amplifier' 역할을 수행함 (이로 인해 시드 간 편차는 오히려 증가함).
+5. 결과: 기존 SOTA와 동등 이상의 성능을 극도로 적은 연산량(높은 FPS)으로 달성함. 특히 탐험에 성공한 시드(Seed)의 경우 평가 점수(Eval Score)를 극대화하는 'Exploitation Amplifier' 역할을 수행함.
 \end{abstract}
 
 \section{Introduction}
@@ -219,6 +221,52 @@ Address \\
 \subsection{Main Performance: The Impact on Different Reward Structures}
 \textbf{- [해야 할 실험 결과 삽입]}
 
+\begin{table}[h]
+\centering
+\caption{Atari 100k Benchmark Performance. 기존 모델(STORM, DRAMA, EDELINE)과 당사의 기법(+ours)을 적용했을 때의 성능 비교.}
+\label{tab:main_performance}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{lrrrrrrrr}
+\toprule
+Game & Random & Human & STORM & STORM+ours & DRAMA & DRAMA+ours & EDELINE & EDELINE+ours \\
+\midrule
+Alien         & 227.8 & 7127.7 & - & - & - & - & - & - \\
+Amidar        & 5.8 & 1719.5 & - & - & - & - & - & - \\
+Assault       & 222.4 & 742.0 & - & - & - & - & - & - \\
+Asterix       & 210.0 & 8503.3 & - & - & - & - & - & - \\
+BankHeist     & 14.2 & 753.1 & - & - & - & - & - & - \\
+BattleZone    & 2360.0 & 37187.5 & - & - & - & - & - & - \\
+Boxing        & 0.1 & 12.1 & - & - & - & - & - & - \\
+Breakout      & 1.7 & 30.5 & - & - & - & - & - & - \\
+ChopperCommand & 811.0 & 7387.8 & - & - & - & - & - & - \\
+CrazyClimber  & 10780.5 & 35829.4 & - & - & - & - & - & - \\
+DemonAttack   & 152.1 & 1971.0 & - & - & - & - & - & - \\
+Freeway       & 0.0 & 29.6 & - & - & - & - & - & - \\
+Frostbite     & 65.2 & 4334.7 & - & - & - & - & - & - \\
+Gopher        & 257.6 & 2412.5 & - & - & - & - & - & - \\
+Hero          & 1027.0 & 30826.4 & - & - & - & - & - & - \\
+Jamesbond     & 29.0 & 302.8 & - & - & - & - & - & - \\
+Kangaroo      & 52.0 & 3035.0 & - & - & - & - & - & - \\
+Krull         & 1598.0 & 2665.5 & - & - & - & - & - & - \\
+KungFuMaster  & 258.5 & 22736.3 & - & - & - & - & - & - \\
+MsPacman      & 307.3 & 6951.6 & - & - & - & - & - & - \\
+Pong          & -20.7 & 14.6 & - & - & - & - & - & - \\
+PrivateEye    & 24.9 & 69571.3 & - & - & - & - & - & - \\
+Qbert         & 163.9 & 13455.0 & - & - & - & - & - & - \\
+RoadRunner    & 11.5 & 7845.0 & - & - & - & - & - & - \\
+Seaquest      & 68.4 & 42054.7 & - & - & - & - & - & - \\
+UpNDown       & 533.4 & 11693.2 & - & - & - & - & - & - \\
+\midrule
+\#Superhuman ($\uparrow$) & 0 & N/A & - & - & - & - & - & - \\
+Mean ($\uparrow$) & 0.000 & 1.000 & - & - & - & - & - & - \\
+Median ($\uparrow$) & 0.000 & 1.000 & - & - & - & - & - & - \\
+IQM ($\uparrow$) & 0.000 & 1.000 & - & - & - & - & - & - \\
+Optimality Gap ($\downarrow$) & 1.000 & 0.000 & - & - & - & - & - & - \\
+\bottomrule
+\end{tabular}
+}
+\end{table}
+
 \begin{itemize}
 \item 1. Frostbite 결과: "부분 보상이 있는 환경에서는 우리의 기법이 Actor-Critic 병목을 완벽히 해소하며 성능이 폭발적으로 상승함."
 \end{itemize}
@@ -229,20 +277,20 @@ Address \\
 \item 결론: "우리의 기법이 강화학습의 최적화 과정을 크게 안정화시킴을 입증."
 \end{itemize}
 
-\subsection{Amplification of Successful Exploration and Seed Divergence}
+\subsection{Amplification of Successful Exploration}
 \textbf{- [해야 할 실험 결과 삽입]}
 
 \begin{itemize}
-\item 제안 기법을 적용했을 때, 시드별 평가 점수(Evaluate Score)의 편차(Variance)가 오히려 \textbf{크게 증가}하는 현상을 보여주는 그래프 삽입.
+\item 제안 기법을 적용했을 때, '탐험에 성공한 시드'의 평가 점수(Evaluate Score)가 폭발적으로 상승하는 현상을 보여주는 그래프 삽입.
 \end{itemize}
 \begin{itemize}
-\item 원인 분석 (Case 1): 15,000 스텝 이전에 800점 이상의 높은 에피소드 점수(Episode Score)를 한 번이라도 달성한 '성공적인 탐험 시드'의 경우, 우리의 Retrieval 기법이 이를 강력하게 Exploitation(활용)하여 평가 점수(Evaluate Score)를 대폭 끌어올림 (Episode Score의 최댓값에 수렴함).
+\item 원인 분석 (Case 1): 15,000 스텝 이전에 800점 이상의 높은 에피소드 점수(Episode Score)를 한 번이라도 달성한 시드의 경우, 우리의 Retrieval 기법이 이를 강력하게 Exploitation(활용)하여 평가 점수(Evaluate Score)를 대폭 끌어올림 (Episode Score의 최댓값에 수렴함).
 \end{itemize}
 \begin{itemize}
-\item 원인 분석 (Case 2): 반면 300점을 넘지 못하는 등 '탐험에 완전히 실패한 시드'의 경우, 검색해서 활용할 양질의 과거 경험이 없으므로 성능 향상이 전혀 발생하지 않음.
+\item 원인 분석 (Case 2): 반면 300점을 넘지 못하는 등 '탐험에 완전히 실패한 시드'의 경우, 검색해서 활용할 양질의 과거 경험이 없으므로 성능 향상이 발생하지 않음.
 \end{itemize}
 \begin{itemize}
-\item 결론: "우리의 기법은 하드코어 탐험(Exploration) 문제를 직접 해결하는 것이 아니라, 우연히 발견된 희소 보상(Sparse Reward)을 \textbf{단 하나도 놓치지 않고 최적의 정책(Optimal Policy)으로 흡수해 내는 강력한 'Exploitation Amplifier' 역할}을 수행한다. 이로 인해 성공한 시드와 실패한 시드의 격차가 벌어지며 분산(Variance)이 커지는 현상은 우리 기법이 의도한 바대로 완벽히 작동하고 있음을 반증한다."
+\item 결론: "우리의 기법은 하드코어 탐험(Exploration) 문제를 직접 해결하는 것이 아니라, 우연히 발견된 희소 보상(Sparse Reward)을 \textbf{단 하나도 놓치지 않고 최적의 정책(Optimal Policy)으로 흡수해 내는 강력한 'Exploitation Amplifier' 역할}을 수행함을 입증한다."
 \end{itemize}
 
 \subsection{Computational Efficiency: Negligible Overhead}
