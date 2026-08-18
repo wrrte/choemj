@@ -4,6 +4,8 @@
 \usepackage{booktabs}
 \usepackage{graphicx}
 \usepackage{amsmath}
+\usepackage{algorithm}
+\usepackage{algorithmic}
 \input{math_commands.tex}
 
 \usepackage{hyperref}
@@ -147,10 +149,107 @@ Environments like Seaquest or Frostbite often require the agent to complete comp
 To directly address the fundamental bottleneck in Actor-Critic optimization, we introduce FLASH.
 
 \subsection{Episodic Memory and Retrieval with FLASH}
-Instead of relying solely on parametric gradient updates, we store successful episodic trajectories and retrieve them to directly regularize or guide the Actor-Critic updates.
+\label{subsec:flash_method}
 
-\todo{여기에 경험을 저장하고 탐색하여 적용하는 방식에 대한 구체적인 수식(Math Equations)과 알고리즘 단계들을 영어로 상세히 작성해주세요. 어떻게 \$Q\$-value나 Policy update에 검색된 경험이 반영되는지 명시해야 합니다.}
+Instead of relying solely on parametric gradient updates, FLASH maintains a lightweight episodic memory indexed by Locality-Sensitive Hashing (LSH) and retrieves structurally similar past contexts to directly augment the Actor-Critic training batch. The pipeline consists of four stages: \textbf{(1) Hashing \& Indexing}, \textbf{(2) Surprise-based Anchor Triggering}, \textbf{(3) Lazy Retrieval with Re-verification}, and \textbf{(4) In-batch Injection with Inverse-Group Weighting}. We describe each stage below and summarize the complete procedure in Algorithm~\ref{alg:flash}. We additionally illustrate the overall architecture in Figure~\ref{fig:flash_pipeline}.
 
+\paragraph{Stage 1: Hashing \& Indexing.}
+At every environment step, the world model encoder $f_\theta$ maps the current observation $o_t$ to a categorical latent representation $z_t = f_\theta(o_t) \in \mathbb{R}^{d}$, where $d = K \times C$ with $K$ categorical variables each of $C$ classes (in practice $K{=}32, C{=}32$, so $d{=}1024$). We apply an LSH function $h: \mathbb{R}^d \to \{0,1,\ldots,2^B{-}1\}$ to produce a discrete hash key:
+\begin{equation}
+h(z_t) = \sum_{i=1}^{B} \mathbf{1}\!\left[\left(W_{\text{proj}}^\top (z_t - \mu)\right)_i > 0\right] \cdot 2^{i-1},
+\label{eq:lsh}
+\end{equation}
+where $B$ is the number of hash bits, $W_{\text{proj}} \in \mathbb{R}^{d \times B}$ is the projection matrix, and $\mu$ is the centering vector. Initially, $W_{\text{proj}}$ is a random Gaussian projection and $\mu = \mathbf{0}$; during \textit{Global Rebuild} (described below), both are updated via PCA on the current buffer's latent distribution to align the hash hyperplanes with the principal axes of variation.
+
+Each transition pointer $(p_t, e)$---where $p_t$ is the circular buffer index and $e$ is the environment index---is inserted into a hash bucket $\mathcal{B}_{h(z_t)}$. If a pointer's hash key changes (due to Global Rebuild), it is transparently migrated. All bucket operations (insert, delete, lookup) run in amortized $\mathcal{O}(1)$.
+
+\paragraph{Stage 2: Surprise-based Anchor Triggering.}
+During each world model training step, FLASH monitors the temporal-difference (TD) error and value difference to detect ``surprise'' events---moments where the agent's value estimate changes abruptly, indicating a potentially pivotal experience. Given a batch of sampled trajectories with value estimates $V(s_t)$ from the critic, we compute:
+\begin{align}
+\delta_t^{\text{TD}} &= \left| r_t + \gamma \, V(s_{t+1})(1 - d_t) - V(s_t) \right|, \label{eq:td_error} \\
+\Delta V_t &= V(s_t) - V(s_{t-1}), \label{eq:value_diff}
+\end{align}
+where $r_t$ is the reward, $\gamma$ is the discount factor, and $d_t$ is the termination flag. To normalize across environments with varying reward scales, we maintain per-environment exponential moving averages (EMA) of the mean and variance:
+\begin{align}
+\bar{\mu}_e &\leftarrow (1-\alpha)\bar{\mu}_e + \alpha \cdot \mathbb{E}[\delta^{\text{TD}}_{e}], \quad
+\bar{\sigma}^2_e \leftarrow (1-\alpha)(\bar{\sigma}^2_e + \alpha \cdot \text{Var}[\delta^{\text{TD}}_{e}]), \label{eq:ema_update}
+\end{align}
+and analogously for $\Delta V$. The combined surprise metric is:
+\begin{equation}
+S_t = \text{ReLU}\!\left(\frac{\delta^{\text{TD}}_t - \bar{\mu}_e}{\sqrt{\bar{\sigma}^2_e} + \epsilon}\right) \cdot \text{softplus}\!\left(\frac{\Delta V_t - \bar{\mu}^{V}_e}{\sqrt{\bar{\sigma}^{2,V}_e} + \epsilon}\right).
+\label{eq:surprise}
+\end{equation}
+This formulation fires only when \textit{both} the TD-error is abnormally large \textit{and} the value is rising, capturing precisely the moments where a high-reward sub-trajectory is first discovered. When $\max_t S_t > \tau_z$ (the z-score threshold), the corresponding buffer pointer (offset by $\Delta_{\text{anchor}}$ steps to align with the causal context window) is registered as an \textit{active anchor} $a = (p_{t+\Delta_\text{anchor}},\, e)$ in a FIFO queue $\mathcal{A}$.
+
+\paragraph{Stage 3: Lazy Retrieval with Re-verification.}
+At each imagination step (where the agent generates imagined trajectories for policy training), FLASH pops up to $M$ anchors from $\mathcal{A}$. For each anchor $a$ with stored hash key $k_a$, we sample up to $m \times (n{-}1)$ candidate pointers from bucket $\mathcal{B}_{k_a}$ (excluding the anchor itself). To combat \textit{representation drift}---the gradual shift in hash keys as $f_\theta$ evolves---we perform \textbf{lazy re-verification}: each candidate's single-frame observation is re-encoded through the \textit{current} world model, and only candidates whose re-computed hash key matches $k_a$ are retained. This yields a set of verified neighbors $\mathcal{N}_a$ with $|\mathcal{N}_a| \leq n$, including the anchor itself.
+
+If the average hit rate (fraction of candidates passing re-verification) drops below a threshold $\eta$, a \textbf{Global Rebuild} is triggered: all hash buckets are cleared, the PCA projection $W_{\text{proj}}$ and mean $\mu$ are recomputed from a fresh encoding of the entire replay buffer, and all transitions are re-hashed. This ensures the hash structure stays aligned with the evolving representation, subject to a cooldown period to amortize cost.
+
+\paragraph{Stage 4: In-batch Injection with Inverse-Group Weighting.}
+For each retrieved group $\mathcal{N}_a$, we extract the preceding $L$-step context window of observations and actions from the replay buffer (validating that no episode termination occurs within the window). These retrieved contexts are concatenated with the standard randomly-sampled imagination batch:
+\begin{equation}
+\mathcal{D}_{\text{imagine}} = \underbrace{\{(o_{t-L:t},\, a_{t-L:t})\}_{i=1}^{N_\text{rand}}}_{\text{random samples}} \;\cup\; \underbrace{\bigcup_{a \in \text{popped}} \{(o^{(j)}_{t-L:t},\, a^{(j)}_{t-L:t})\}_{j \in \mathcal{N}_a}}_{\text{retrieved contexts}},
+\label{eq:batch_compose}
+\end{equation}
+where $N_{\text{rand}} = \max(0,\, N_{\text{total}} - |\text{retrieved}|)$ ensures the total batch size remains constant. Critically, each context within a group receives an \textbf{inverse-group weight} $w_j = 1/|\mathcal{N}_a|$, preventing any single anchor from dominating the gradient. Random samples receive weight $w=1$. These weights are applied to the Actor-Critic loss:
+\begin{equation}
+\mathcal{L}_{\text{AC}} = \sum_{i} w_i \left[\mathcal{L}_{\text{actor}}(s_i, a_i) + \mathcal{L}_{\text{critic}}(s_i)\right].
+\label{eq:weighted_loss}
+\end{equation}
+
+\paragraph{Warmup Curriculum.}
+During an initial warmup phase (the first $T_{\text{warm}}$ environment steps), the EMA statistics accumulate but no anchors are triggered and no retrieval occurs. This prevents noisy early-stage value estimates from corrupting the anchor selection process. Retrieval is activated only after the world model and value function have stabilized sufficiently.
+
+\begin{algorithm}[t]
+\caption{FLASH: Fast Latent Anchor Search with Hashing}
+\label{alg:flash}
+\begin{algorithmic}[1]
+\REQUIRE Replay buffer $\mathcal{R}$, world model encoder $f_\theta$, critic $V_\psi$, hash function $h(\cdot)$
+\REQUIRE Hyperparameters: hash bits $B$, z-score threshold $\tau_z$, warmup steps $T_{\text{warm}}$, context length $L$, max anchors $M$, multiplier $m$, target $n$, rebuild threshold $\eta$, cooldown $C$
+\STATE Initialize hash buckets $\{\mathcal{B}_k\}$, anchor queue $\mathcal{A} \leftarrow \emptyset$, EMA statistics
+\FOR{each environment step $t$}
+    \STATE Encode $z_t \leftarrow f_\theta(o_t)$, compute $k_t \leftarrow h(z_t)$
+    \STATE Insert pointer $(p_t, e)$ into $\mathcal{B}_{k_t}$
+\ENDFOR
+\FOR{each world model training step (after warmup)}
+    \STATE Compute batch TD-errors $\delta^{\text{TD}}_t$ and value-differences $\Delta V_t$
+    \STATE Update EMA statistics via Eq.~\eqref{eq:ema_update}
+    \STATE Compute surprise $S_t$ via Eq.~\eqref{eq:surprise}
+    \IF{$\max_t S_t > \tau_z$}
+        \STATE Push anchor $(p_{t^*+\Delta_\text{anchor}}, e)$ into $\mathcal{A}$
+    \ENDIF
+\ENDFOR
+\FOR{each imagination step (policy training)}
+    \STATE Pop up to $M$ anchors from $\mathcal{A}$
+    \FOR{each anchor $a$ with key $k_a$}
+        \STATE Sample candidates from $\mathcal{B}_{k_a}$, re-encode, keep matches $\to \mathcal{N}_a$
+    \ENDFOR
+    \STATE Compose augmented batch $\mathcal{D}_{\text{imagine}}$ via Eq.~\eqref{eq:batch_compose}
+    \STATE Train Actor-Critic with weighted loss (Eq.~\eqref{eq:weighted_loss})
+    \IF{avg hit rate $< \eta$ and cooldown elapsed}
+        \STATE \textbf{Global Rebuild}: PCA $\to$ update $(W_{\text{proj}}, \mu)$, re-hash all $\mathcal{R}$
+    \ENDIF
+\ENDFOR
+\end{algorithmic}
+\end{algorithm}
+
+\begin{figure}[t]
+\centering
+\todo{Figure~\ref{fig:flash_pipeline}에 들어갈 FLASH 파이프라인 다이어그램을 여기에 삽입해주세요. 아래 묘사를 참고하여 제작하시면 됩니다.}
+\caption{Overview of the FLASH pipeline. \textbf{(Left)} During environment interaction, each observation is encoded and hashed into LSH buckets via PCA-adapted projections. \textbf{(Center)} During world model training, TD-error and value-difference z-scores are combined to detect surprise events, triggering anchor registration. \textbf{(Right)} During imagination, anchors retrieve structurally similar contexts via lazy re-verification, which are injected into the training batch with inverse-group weighting. A Global Rebuild periodically realigns the hash structure with the evolving representation.}
+\label{fig:flash_pipeline}
+\end{figure}
+
+\subsection{Theoretical Intuition: Gradient Acceleration via In-Batch Retrieval}
+A core strength of FLASH is how it naturally accelerates optimization without introducing artificial contrastive biases. By simply retrieving historical states and injecting them into the current training batch alongside the current state, we construct a highly informative local gradient step. 
+
+Intuitively, this in-batch proximity creates a bifurcated gradient effect:
+\begin{itemize}
+    \item \textbf{Constructive Alignment:} If the current state and the retrieved state are genuinely similar, processing them simultaneously allows the network to smoothly align their value estimates, reinforcing the correct learning signal.
+    \item \textbf{Destructive Separation (Anti-Aliasing):} If the states merely appear similar but represent different underlying game dynamics (perceptual aliasing), placing them in the exact same batch forces the network to differentiate them immediately. If such aliased states were processed in separate batches across different steps, their conflicting gradients would oscillate and cancel each other out, severely delaying convergence. By processing them simultaneously in the same forward-backward pass, the gradients actively push the network to separate their representations and value predictions in a single step.
+\end{itemize}
+Thus, simply altering the batch composition via retrieval naturally acts as a self-correcting regularizer that drastically speeds up optimization.
 \subsection{Curriculum Activation}
 Retrieving episodes too early during training, when the world model and representations are still highly unstable, can introduce noisy signals. Therefore, we employ a curriculum activation strategy.
 
@@ -174,38 +273,38 @@ Table~\ref{tab:main_performance} presents the comprehensive Atari 100k results.
 \toprule
 Game & Random & Human & STORM & STORM+ours & DRAMA & DRAMA+ours & EDELINE & EDELINE+ours \\
 \midrule
-Alien         & 227.8 & 7127.7 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-Amidar        & 5.8 & 1719.5 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-Assault       & 222.4 & 742.0 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-Asterix       & 210.0 & 8503.3 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-BankHeist     & 14.2 & 753.1 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-BattleZone    & 2360.0 & 37187.5 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-Boxing        & 0.1 & 12.1 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-Breakout      & 1.7 & 30.5 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-ChopperCommand & 811.0 & 7387.8 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-CrazyClimber  & 10780.5 & 35829.4 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-DemonAttack   & 152.1 & 1971.0 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-Freeway       & 0.0 & 29.6 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-Frostbite     & 65.2 & 4334.7 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-Gopher        & 257.6 & 2412.5 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-Hero          & 1027.0 & 30826.4 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-Jamesbond     & 29.0 & 302.8 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-Kangaroo      & 52.0 & 3035.0 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-Krull         & 1598.0 & 2665.5 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-KungFuMaster  & 258.5 & 22736.3 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-MsPacman      & 307.3 & 6951.6 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-Pong          & -20.7 & 14.6 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-PrivateEye    & 24.9 & 69571.3 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-Qbert         & 163.9 & 13455.0 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-RoadRunner    & 11.5 & 7845.0 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-Seaquest      & 68.4 & 42054.7 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-UpNDown       & 533.4 & 11693.2 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+Alien         & 227.8 & 7127.7 & - & - & - & - & - & - \\
+Amidar        & 5.8 & 1719.5 & - & - & - & - & - & - \\
+Assault       & 222.4 & 742.0 & - & - & - & - & - & - \\
+Asterix       & 210.0 & 8503.3 & - & - & - & - & - & - \\
+BankHeist     & 14.2 & 753.1 & - & - & - & - & - & - \\
+BattleZone    & 2360.0 & 37187.5 & - & - & - & - & - & - \\
+Boxing        & 0.1 & 12.1 & - & - & - & - & - & - \\
+Breakout      & 1.7 & 30.5 & - & - & - & - & - & - \\
+ChopperCommand & 811.0 & 7387.8 & - & - & - & - & - & - \\
+CrazyClimber  & 10780.5 & 35829.4 & - & - & - & - & - & - \\
+DemonAttack   & 152.1 & 1971.0 & - & - & - & - & - & - \\
+Freeway       & 0.0 & 29.6 & - & - & - & - & - & - \\
+Frostbite     & 65.2 & 4334.7 & - & - & - & - & - & - \\
+Gopher        & 257.6 & 2412.5 & - & - & - & - & - & - \\
+Hero          & 1027.0 & 30826.4 & - & - & - & - & - & - \\
+Jamesbond     & 29.0 & 302.8 & - & - & - & - & - & - \\
+Kangaroo      & 52.0 & 3035.0 & - & - & - & - & - & - \\
+Krull         & 1598.0 & 2665.5 & - & - & - & - & - & - \\
+KungFuMaster  & 258.5 & 22736.3 & - & - & - & - & - & - \\
+MsPacman      & 307.3 & 6951.6 & - & - & - & - & - & - \\
+Pong          & -20.7 & 14.6 & - & - & - & - & - & - \\
+PrivateEye    & 24.9 & 69571.3 & - & - & - & - & - & - \\
+Qbert         & 163.9 & 13455.0 & - & - & - & - & - & - \\
+RoadRunner    & 11.5 & 7845.0 & - & - & - & - & - & - \\
+Seaquest      & 68.4 & 42054.7 & - & - & - & - & - & - \\
+UpNDown       & 533.4 & 11693.2 & - & - & - & - & - & - \\
 \midrule
-\#Superhuman ($\uparrow$) & 0 & N/A & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-Mean ($\uparrow$) & 0.000 & 1.000 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-Median ($\uparrow$) & 0.000 & 1.000 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-IQM ($\uparrow$) & 0.000 & 1.000 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
-Optimality Gap ($\downarrow$) & 1.000 & 0.000 & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} & \todo{?} \\
+\#Superhuman ($\uparrow$) & 0 & N/A & - & - & - & - & - & - \\
+Mean ($\uparrow$) & 0.000 & 1.000 & - & - & - & - & - & - \\
+Median ($\uparrow$) & 0.000 & 1.000 & - & - & - & - & - & - \\
+IQM ($\uparrow$) & 0.000 & 1.000 & - & - & - & - & - & - \\
+Optimality Gap ($\downarrow$) & 1.000 & 0.000 & - & - & - & - & - & - \\
 \bottomrule
 \end{tabular}
 }
