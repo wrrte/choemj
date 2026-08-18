@@ -61,7 +61,7 @@ Address \\
 2. 핵심 발견 (가장 중요): 기존 모델들의 성능이 떨어지는 것은 'Reconstruction(복원)이 안 되어서(Representation이 부족해서)'가 아님을 증명. 사실 인코더는 이미 충분한 정보를 담고 있다.
 3. 진짜 문제점 지적: 여러 시드(Seed)에 따른 극심한 성능 편차 등은 병목 현상이 Representation이 아니라 Actor-Critic의 최적화 과정에 있음을 시사함.
 4. 제안 방법: 무거운 Diffusion 대신, Actor-Critic의 최적화를 돕는 효율적인 Episodic Retrieval(경험 검색) 기법을 제안.
-5. 결과: 기존 SOTA와 동등 이상의 성능을 극도로 적은 연산량(높은 FPS)으로 달성했으며, 시드 간 편차도 크게 줄임.
+5. 결과: 기존 SOTA와 동등 이상의 성능을 극도로 적은 연산량(높은 FPS)으로 달성함. 특히 탐험에 성공한 시드(Seed)의 경우 평가 점수(Eval Score)를 극대화하는 'Exploitation Amplifier' 역할을 수행함 (이로 인해 시드 간 편차는 오히려 증가함).
 \end{abstract}
 
 \section{Introduction}
@@ -229,25 +229,41 @@ Address \\
 \item 결론: "우리의 기법이 강화학습의 최적화 과정을 크게 안정화시킴을 입증."
 \end{itemize}
 
-\subsection{Variance Reduction and Stability}
+\subsection{Amplification of Successful Exploration and Seed Divergence}
 \textbf{- [해야 할 실험 결과 삽입]}
 
 \begin{itemize}
-\item 제안 기법을 적용했을 때, 기존 대비 시드별 성능 편차(Variance)가 극적으로 줄어든 그래프 삽입.
+\item 제안 기법을 적용했을 때, 시드별 평가 점수(Evaluate Score)의 편차(Variance)가 오히려 \textbf{크게 증가}하는 현상을 보여주는 그래프 삽입.
 \end{itemize}
 \begin{itemize}
-\item "최적화 병목이 해소되어 학습이 매우 안정적으로 진행됨."
+\item 원인 분석 (Case 1): 15,000 스텝 이전에 800점 이상의 높은 에피소드 점수(Episode Score)를 한 번이라도 달성한 '성공적인 탐험 시드'의 경우, 우리의 Retrieval 기법이 이를 강력하게 Exploitation(활용)하여 평가 점수(Evaluate Score)를 대폭 끌어올림 (Episode Score의 최댓값에 수렴함).
+\end{itemize}
+\begin{itemize}
+\item 원인 분석 (Case 2): 반면 300점을 넘지 못하는 등 '탐험에 완전히 실패한 시드'의 경우, 검색해서 활용할 양질의 과거 경험이 없으므로 성능 향상이 전혀 발생하지 않음.
+\end{itemize}
+\begin{itemize}
+\item 결론: "우리의 기법은 하드코어 탐험(Exploration) 문제를 직접 해결하는 것이 아니라, 우연히 발견된 희소 보상(Sparse Reward)을 \textbf{단 하나도 놓치지 않고 최적의 정책(Optimal Policy)으로 흡수해 내는 강력한 'Exploitation Amplifier' 역할}을 수행한다. 이로 인해 성공한 시드와 실패한 시드의 격차가 벌어지며 분산(Variance)이 커지는 현상은 우리 기법이 의도한 바대로 완벽히 작동하고 있음을 반증한다."
 \end{itemize}
 
-\subsection{Computational Efficiency: Time Complexity Analysis}
+\subsection{Computational Efficiency: Negligible Overhead}
+\textbf{- [해야 할 실험/분석 결과 삽입]}
+
 \begin{itemize}
-\item [해야 할 실험/분석 결과 삽입]
+\item 제안하는 Retrieval 기법을 기존 모델(예: Edeline 등 Diffusion 기반 모델)에 추가했을 때 발생하는 추가 연산량(Overhead) 분석.
 \end{itemize}
 \begin{itemize}
-\item Diffusion RL 모델들과의 연산량 비교.
+\item 알고리즘의 세부 시간 복잡도(Time Complexity) 분석 명시: 
+    \begin{itemize}
+    \item 매 프레임 삽입(Insertion per frame) 복잡도: $O(\text{[채워넣기]})$
+    \item Global Rebuild 발생 시 복잡도: $O(\text{[채워넣기]})$
+    \item 이런 식으로 검색 시나 그런 거 각각의 시간복잡도 적어두기
+    \end{itemize}
 \end{itemize}
 \begin{itemize}
-\item "우리의 Retrieval 기법이 코딩 레벨에서 저장, 탐색, 적용에 드는 시간 복잡도를 분석한 결과, FPS(Frames Per Second) 측면에서 Diffusion 대비 압도적으로 빠르다." (표 또는 그래프 필수)
+\item 위 이론적 복잡도를 바탕으로, 기법 추가 전후의 총 학습 시간이나 FPS(Frames Per Second) 차이를 실제 측정하여 비교.
+\end{itemize}
+\begin{itemize}
+\item "본 기법은 Actor-Critic의 치명적인 병목을 뚫어내어 막대한 성능 향상을 이끌어내면서도, 추가 연산량이 거의 0에 수렴하는 매우 가볍고(Lightweight) 효율적인 플러그인(Plug-in) 기법이다." (이를 증명하는 표 필수)
 \end{itemize}
 
 \subsection{Train vs. Evaluation Performance Gap (Discussion)}
@@ -257,7 +273,7 @@ Address \\
 \item 학습 중 에피소드 스코어는 낮게 유지되지만, 평가(Evaluation) 스코어는 월등히 높은 현상 분석.
 \end{itemize}
 \begin{itemize}
-\item "이는 에이전트가 오프폴리시(Off-policy) 탐험 중 얻은 노이즈 낀 데이터로부터도 정답(Optimal Policy)을 내부적으로 완벽하게 최적화해내고 있다는 강력한 증거다."
+\item "이는 에이전트가 탐험(Exploration)을 위해 무작위성이 추가된 Sub-optimal 궤적들을 수집하는 와중에도, 우리의 기법이 해당 경험들로부터 최적의 정책(Optimal Policy)을 성공적으로 분리하여 최적화해 냈음을 입증하는 강력한 증거이다."
 \end{itemize}
 
 \section{Conclusion}
