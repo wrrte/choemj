@@ -34,7 +34,7 @@
 \maketitle
 
 \begin{abstract}
-Recent advancements in Reinforcement Learning (RL) have heavily adopted World Models and Diffusion-based techniques; however, they often suffer from prohibitive computational costs. In this paper, we first investigate the common assumption that the performance bottleneck of existing models lies primarily in their representation capacity (e.g., poor image reconstruction). Through rigorous probing analysis, we provide evidence suggesting that existing lightweight encoders can already capture robust object-level information. This implies that representation capacity may not be the sole limitation, prompting us to investigate other structural candidates. Among these, we identify the optimization process of the Actor-Critic architecture as a major, independent bottleneck, characterized by extreme performance variance across different random seeds. To mitigate this specific issue, we propose FLASH (Fast Latent Anchor Search with Hashing), a lightweight and efficient plug-and-play module that directly aids Actor-Critic optimization. By seamlessly integrating into various RL baselines—ranging from lightweight encoder-based models to heavy diffusion-based models—FLASH elevates their performance significantly while preserving their original frames per second (FPS). Crucially, our approach acts as a powerful "Exploitation Amplifier," maximizing the evaluation scores of seeds that successfully explore, all with negligible computational overhead.
+Recent advancements in Reinforcement Learning (RL) have heavily adopted World Models and Diffusion-based techniques; however, they often suffer from prohibitive computational costs. In this paper, we first investigate the common assumption that the performance bottleneck of existing models lies primarily in their representation capacity (e.g., poor image reconstruction). Through rigorous probing analysis, we provide evidence suggesting that existing lightweight encoders can already capture robust object-level information. This implies that representation capacity may not be the sole limitation, prompting us to investigate other structural candidates. Among these, we identify the optimization process of the Actor-Critic architecture as a major, independent bottleneck, characterized by extreme performance variance across different random seeds. To mitigate this specific issue, we propose FLASH (Fast Latent Anchor Search with Hashing), a lightweight and efficient plug-and-play module that naturally aids Actor-Critic optimization. By seamlessly integrating into various RL baselines—ranging from lightweight encoder-based models to heavy diffusion-based models—FLASH elevates their performance significantly while preserving their original frames per second (FPS). Crucially, our approach acts as a powerful "Exploitation Amplifier," maximizing the evaluation scores of seeds that successfully explore, all with negligible computational overhead.
 \end{abstract}
 
 \section{Introduction}
@@ -67,7 +67,7 @@ Finally, to mitigate this specific optimization bottleneck, we propose FLASH, an
 \subsection{The Myth of Reconstruction Quality}
 A common fallacy in recent model-based RL research is the assumption that blurry decoded images imply a lack of information in the latent space. We argue that this is merely a rendering failure of the decoder.
 
-As qualitative evidence, we observe the \textit{temporal persistence of objects} in models like DreamerV3 and Drama \todo{해당 논문 인용}. For instance, when a submarine approaches a fish, the fish may blur or disappear from the decoded frame, only to reappear perfectly in its expected trajectory in subsequent frames. This phenomenon proves that the ontological information of the object was never lost in the latent state $z$; it was simply not rendered by the decoder at time $t$. Therefore, relying on reconstruction quality is a deceptive metric for evaluating the true capacity of an encoder.
+As qualitative evidence, we observe the \textit{temporal persistence of objects} during the \textbf{open-loop imagination phase} in models like DreamerV3 and Drama \todo{해당 논문 인용}. During this phase, the model predicts future states solely based on its internal transition dynamics, without access to real observations. For instance, when a submarine approaches a fish in an imagined trajectory, the fish may blur or disappear from the decoded frame at time $t$, only to reappear perfectly in its expected trajectory at time $t+1$. Since the model has no external input to "rediscover" the fish at $t+1$, this phenomenon definitively proves that the ontological information of the object was never lost in the latent state $z_t$; the transition model successfully propagated it to $z_{t+1}$, and it was simply a rendering failure of the decoder at time $t$. Therefore, relying on reconstruction quality is a deceptive metric for evaluating the true capacity of an encoder.
 
 \begin{figure}[h]
 \centering
@@ -77,9 +77,27 @@ As qualitative evidence, we observe the \textit{temporal persistence of objects}
 \end{figure}
 
 \subsection{Preliminary Observation: The Cosine Similarity Clue}
-To formally investigate the encoder's sensitivity to small details, we designed a motivating experiment. We passed two nearly identical image crops through the encoder: the only difference being the presence or absence of a single small diver in the frame.
+To formally investigate whether the encoder successfully captures functionally critical, yet small and static elements, we designed a motivating experiment. Instead of a single comparison, we generated two comprehensive sets of images: one varying the number of collected divers at the bottom (from 0 to 6), and another varying the position of a single diver on the screen. We then extracted their latent states and computed the pairwise cosine similarities.
 
-Interestingly, the cosine similarity between the extracted latent states from these two images was \todo{여기에 실제 측정한 코사인 유사도 수치를 적어주세요. 예: 0.85}. If the lightweight encoder had completely ignored the diver, the similarity would have been exactly 1.0. The fact that it is strictly less than 1.0 provides a strong clue that the encoder successfully detects and maps this minute pixel difference into the latent space, motivating our subsequent probing analysis.
+\begin{figure}[h]
+\centering
+\begin{minipage}{0.48\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{diver_count.jpg}
+  \caption{Cosine Similarity: Diver Count (0-6)}
+  \label{fig:heatmap_count}
+\end{minipage}\hfill
+\begin{minipage}{0.48\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{diver_location.jpg}
+  \caption{Cosine Similarity: Diver Position}
+  \label{fig:heatmap_position}
+\end{minipage}
+\caption{Cosine similarity heatmaps of latent states in Seaquest. If the lightweight encoder had completely ignored these small, static elements, the similarities would be uniformly 1.0. The distinct structured patterns strongly indicate that the encoder maps these critical features into the latent space.}
+\label{fig:heatmaps}
+\end{figure}
+
+As shown in Figure~\ref{fig:heatmaps}, both heatmaps reveal distinct structural patterns rather than a uniform similarity of 1.0. For the diver count (left), states with adjacent counts exhibit high similarity (ranging from $0.93$ to $0.98$), but the relationship is non-linear for larger differences. For instance, when comparing 0 divers to $n$ divers, the similarity drops to a minimum of $0.86$ at $n=3$, before slightly recovering to $0.90$ at $n=6$. Similarly, for the diver's spatial position (right), we fixed the submarine in the center of the screen and moved a single diver from the far left edge to just left of the submarine. As the diver's position shifts, the latent similarity degrades, dropping down to $0.63$ at the maximum displacement. If the lightweight encoder had completely ignored these small, static elements, all latent states would be identical (similarity of 1.0). The fact that the similarities dynamically and distinctly reflect the underlying game state provides a strong clue that the encoder successfully detects and maps these critical static features into the latent space, motivating our subsequent probing analysis.
 
 \subsection{Probing the Latent Space}
 To verify exactly what information the latent state $z$ contains, we conducted a probing experiment on the Seaquest environment, known for its extreme sparse rewards and tiny objects. We detached the pre-trained encoder (stopping gradient flow) and trained a lightweight MLP to predict ground-truth RAM states directly from $z$.
@@ -179,7 +197,11 @@ Optimality Gap ($\downarrow$) & 1.000 & 0.000 & \todo{?} & \todo{?} & \todo{?} &
 }
 \end{table}
 
-In environments featuring distinct sub-goals and episodic rewards like Frostbite, Asterix, and Qbert, FLASH successfully captures rare value spikes, resulting in an explosive performance increase. Conversely, in environments characterized by dense, continuous rewards or pure long-horizon exploration (e.g., MsPacman, Seaquest), the performance gain is more bounded. This perfectly aligns with our design: FLASH specifically mitigates the Actor-Critic bottleneck associated with sudden positive value shifts (breakthroughs), but does not artificially solve fundamental exploration challenges or alter dense-reward dynamics. Overall, the results prove that our approach significantly stabilizes the RL optimization process where value-spike bottlenecks exist.
+Our initial evaluation reveals that FLASH yields substantial improvements in several environments (e.g., Frostbite, Asterix, Qbert), while showing marginal changes or noise-level variance in others (e.g., Hero, MsPacman, Seaquest). 
+
+\todo{26개 Atari 게임 전체에 대한 실험 결과 데이터가 확보된 후, 어떤 환경적 특성(예: 보상 주기, 탐험 난이도, State Space 복잡도 등)이 FLASH의 성능 향상 유무를 결정짓는지 심층적인 분석(Discussion)을 여기에 작성해주세요. 왜 특정 그룹에서만 성능이 크게 오르는지 객관적인 공통점을 도출해야 합니다.}
+
+Overall, the preliminary results indicate that our approach significantly stabilizes the RL optimization process in specific environments, paving the way for a deeper investigation into the structural dependencies of Actor-Critic bottlenecks.
 
 \subsection{Amplification of Successful Exploration}
 
