@@ -126,17 +126,17 @@ If the entanglement hypothesis were true, the extreme noise in other spatial loc
 \section{Beyond Representations: The Actor-Critic Optimization Bottleneck}
 \label{sec:bottleneck}
 
-\subsection{High Variance Across Random Seeds}
-A potential counterargument is that representation learning itself might vary across seeds, causing the performance discrepancy. However, in model-based RL, the world model (and its encoder) is trained via dense, self-supervised objectives (e.g., reconstruction and forward prediction), which consistently and stably converge across all seeds. Despite this uniform, high-quality representational foundation, we observe extreme variance in the final evaluation scores across different random seeds. This disconnect strongly suggests that the bottleneck lies strictly within the Actor-Critic optimization process, failing to exploit the available representations.
+\subsection{Insufficient Exploitation of Successful Trajectories}
+Having established in Section~\ref{sec:representation} that the encoder already captures rich semantic information, we now investigate the downstream optimization process. We observe that even when some seeds discover high-reward trajectories during training, the Actor-Critic often fails to fully capitalize on them, resulting in evaluation scores far below the potential suggested by its best episodes.
 
 \begin{figure}[h]
 \centering
-\todo{여러 시드로 돌렸을 때 성능 편차가 매우 큼을 보여주는 그래프 이미지 삽입}
-\caption{\todo{시드별 성능 편차 그래프를 설명하는 캡션. Actor-Critic 최적화의 불안정성을 강조.}}
+\todo{시드별로 ``학습 중 최고 에피소드 점수''와 ``최종 평가 점수''를 나란히 비교하는 바 차트 삽입. 괴리가 클수록 exploit 실패를 시각적으로 보여줌.}
+\caption{\todo{각 시드의 학습 중 최고 에피소드 점수 대비 최종 평가 점수를 비교한 그래프. 높은 에피소드 점수를 달성했음에도 최종 평가에서 이를 재현하지 못하는 괴리가 AC 최적화의 exploitation 실패를 보여준다.}}
 \label{fig:seed_variance}
 \end{figure}
 
-As shown in Figure~\ref{fig:seed_variance}, the agent succeeds in some seeds and fails entirely in others. This highly stochastic outcome is a classic hallmark of unstable policy and value function optimization in RL, strongly indicating that the Actor-Critic training dynamics present a distinct and major bottleneck independent of representation capacity.
+As shown in Figure~\ref{fig:seed_variance}, despite access to the same high-quality representations, evaluation scores vary dramatically across seeds. This gap between the best episodes encountered during training and the final evaluation performance reveals that the Actor-Critic optimization process is the primary bottleneck\u2014not in its ability to represent the world, but in its ability to \textit{exploit} what it has already discovered. This observation directly motivates the design of an exploitation amplifier.
 
 \subsection{The Challenge of Delayed Rewards and Value Spikes}
 Environments like Seaquest or Frostbite often require the agent to complete complex sub-goals (e.g., collecting multiple divers or building an igloo) before receiving a massive reward. In such scenarios, the agent may occasionally stumble upon a breakthrough during random exploration, causing a sudden, massive spike in the true state value. Traditional Actor-Critic architectures struggle to efficiently stabilize and learn from these rare, high-variance value spikes, often losing the critical exploratory signal in the noise of standard transitions.
