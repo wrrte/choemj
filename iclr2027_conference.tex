@@ -271,7 +271,7 @@ Retrieving episodes too early during training, when the world model and represen
 \label{sec:experiments}
 
 \subsection{Experimental Setup}
-We evaluate our method on the Atari 100k benchmark, focusing particularly on Seaquest (representing extreme delayed rewards) and Frostbite (representing partial, dense rewards) to analyze the impact of different reward structures.
+We evaluate our method across all 26 games of the Atari 100k benchmark. This diverse suite of environments allows us to comprehensively assess the general applicability and robustness of our approach under varying reward structures, dynamics, and exploration difficulties.
 
 \subsection{Main Performance}
 Table~\ref{tab:main_performance} presents the comprehensive Atari 100k results. 
@@ -344,9 +344,10 @@ Because FLASH focuses solely on optimizing the Actor-Critic training rather than
 
 The algorithmic time complexity is as follows:
 \begin{itemize}
-    \item Insertion per frame: $\mathcal{O}(\todo{여기에 삽입 시간복잡도 수식 입력})$
-    \item Global Rebuild: $\mathcal{O}(\todo{여기에 Rebuild 시간복잡도 수식 입력})$
-    \item Retrieval step: $\mathcal{O}(\todo{여기에 검색 시간복잡도 수식 입력})$
+    \item Insertion per frame: $\mathcal{O}(d \cdot B) \approx \mathcal{O}(1)$. The representation encoding cost $\mathcal{O}(|f_\theta|)$ is completely absorbed since the world model inherently computes the latent state during environment interaction. Because the latent dimension $d$ and hash bits $B$ are small fixed parameters, this operates in effectively constant time.
+    \item Global Rebuild: $\mathcal{O}(N_{\text{buf}} d^2 + d^3 + N_{\text{buf}} d B) \approx \mathcal{O}(N_{\text{buf}})$. Even though PCA is computed over the entire replay buffer, the latent dimensions $d$ and hash bits $B$ are fixed, so the overall operation scales linearly only with the buffer size $N_{\text{buf}}$. Furthermore, Global Rebuild is not executed every step; it is only triggered occasionally when the lazy rebuild hit-rate drops, making its amortized cost negligibly small.
+    \item Retrieval step: $\mathcal{O}\big(M m n (|f_\theta| + d \cdot B) + M n L\big) \approx \mathcal{O}(1)$. The maximum number of anchors $M$, candidates $m \times n$, and context length $L$ are strictly bounded hyperparameters. Thus, the verification and extraction process runs in constant $\mathcal{O}(1)$ time.
+    \item Anchor Triggering: $\mathcal{O}(N_{\text{batch}} \cdot L_{\text{seq}}) \approx \mathcal{O}(1)$. Performing lightweight TD-error and EMA-based Z-score tracking over the imagined sequences requires no additional neural network forward passes. Since the batch size and sequence length are fixed, the overhead is constant per step.
 \end{itemize}
 
 \begin{table}[h]
@@ -370,13 +371,13 @@ During training, the episode score often remains relatively low due to the inher
 
 \section{Conclusion}
 \label{sec:conclusion}
-In this paper, we critique the recent trend of obsessing over visual representation quality in RL. We demonstrate that existing lightweight encoders already possess sufficient capacity. By shifting focus to the Actor-Critic optimization process as a major, independent bottleneck, we proposed FLASH, an efficient and low-overhead retrieval method. Our plug-and-play approach successfully amplifies rare exploratory successes and universally elevates the performance of existing RL baselines—including both lightweight and heavy diffusion-based models—while maintaining extreme computational efficiency.
+In this paper, we critique the recent trend of obsessing over visual representation quality in RL. We demonstrate that existing lightweight encoders already possess sufficient capacity, implying that representation learning is no longer the primary bottleneck. Recognizing that the Actor-Critic optimization itself acts as a crucial, independent bottleneck, we proposed FLASH, an efficient and low-overhead retrieval method. Our plug-and-play approach successfully amplifies rare exploratory successes and universally elevates the performance of existing RL baselines—including both lightweight and heavy diffusion-based models—while maintaining extreme computational efficiency.
 
 \bibliography{iclr2027_conference}
 \bibliographystyle{iclr2027_conference}
 
 \appendix
 \section{Appendix}
-\todo{추가적인 실험 결과나 하이퍼파라미터 세팅 등을 이 곳에 적어주세요.}
+\todo{fill later}
 
 \end{document}
