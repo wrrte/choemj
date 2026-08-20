@@ -1,6 +1,6 @@
 \documentclass{article} % For LaTeX2e
 \usepackage{iclr2027_conference,times}
-\usepackage{kotex} % 한국어 출력을 위해 추가 (필요시 나중에 제거)
+\usepackage{kotex} % Added for Korean output (remove later if necessary)
 \usepackage{booktabs}
 \usepackage{graphicx}
 \usepackage{amsmath}
@@ -15,15 +15,15 @@
 % 빈칸(TODO)을 쉽게 찾을 수 있도록 강조하는 매크로
 \newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
 
-\title{\todo{여기에 논문의 공식 영문 제목을 적어주세요. 예: Are Heavy Representations Necessary in RL? Empowering Actor-Critic with Efficient Episodic Retrieval}}
+\title{FLASH: Fast Latent Anchor Search with Hashing}
 
-\author{\todo{저자 1 이름} \\
-\todo{저자 1 소속 기관} \\
-\texttt{\todo{저자1 이메일}} \\
+\author{\todo{Author 1 Name} \\
+\todo{Author 1 Affiliation} \\
+\texttt{\todo{Author 1 Email}} \\
 \And
-\todo{저자 2 이름} \\
-\todo{저자 2 소속 기관} \\
-\texttt{\todo{저자2 이메일}} \\
+\todo{Author 2 Name} \\
+\todo{Author 2 Affiliation} \\
+\texttt{\todo{Author 2 Email}} \\
 % 필요한 만큼 \And 로 추가하세요
 }
 
@@ -42,7 +42,7 @@ Recent advancements in Reinforcement Learning (RL) have heavily adopted World Mo
 \section{Introduction}
 \label{sec:intro}
 
-Recently, the integration of Diffusion models into Reinforcement Learning (RL) has become increasingly popular, yielding strong performance in various benchmarks \todo{DIAMOND 등 Diffusion 기반 RL 최신 논문 인용}. However, this trend has brought about a significant drawback: massive computational costs and high latency during both training and inference. This raises a fundamental question: \textit{Are these heavy computational overheads truly necessary, or are we addressing the wrong bottleneck?}
+Recently, the integration of Diffusion models into Reinforcement Learning (RL) has become increasingly popular, yielding strong performance in various benchmarks \todo{Cite recent Diffusion-based RL papers such as DIAMOND}. However, this trend has brought about a significant drawback: massive computational costs and high latency during both training and inference. This raises a fundamental question: \textit{Are these heavy computational overheads truly necessary, or are we addressing the wrong bottleneck?}
 
 In this work, we suggest that the current singular focus on enhancing representation quality through heavy generative models may overlook other critical components of the RL pipeline. By observing extreme performance variance across different random seeds in standard setups, we hypothesize that the inherent instability in the Actor-Critic optimization process itself constitutes a major, independent bottleneck. 
 
@@ -55,13 +55,13 @@ Finally, to mitigate this specific optimization bottleneck, we propose FLASH, an
 \label{sec:related}
 
 \textbf{Representation Learning in RL.} 
-\todo{기존 강화학습에서의 Representation Learning 논문들 (예: Dreamer 시리즈, CURL, SPR 등)을 나열하고 간략히 요약해주세요.}
+\todo{List and briefly summarize existing Representation Learning papers in RL (e.g., Dreamer series, CURL, SPR, etc.).}
 
 \textbf{Diffusion Models for Reinforcement Learning.}
-\todo{DIAMOND와 같이 최근 RL에 Diffusion을 접목한 연구들을 나열하고, 이들의 연산량이 과도하다는 한계점을 영어로 서술해주세요.}
+\todo{List recent studies applying Diffusion to RL like DIAMOND, and describe their limitation of excessive computational cost.}
 
 \textbf{Episodic Control and Retrieval-augmented RL.}
-\todo{Episodic Memory를 사용한 과거 연구들(예: Model-Free Episodic Control, EVA 등)을 나열하고, FLASH가 이들과 어떻게 차별화되는지(예: Actor-Critic의 병목을 명시적으로 타겟팅하며 연산량이 극도로 적음)를 적어주세요.}
+\todo{List previous works using Episodic Memory (e.g., Model-Free Episodic Control, EVA), and explain how FLASH differentiates from them (e.g., explicitly targeting the Actor-Critic bottleneck with extremely low computational cost).}
 
 \section{Are Heavy Representations Necessary?: Decoding the Sufficiency of Encoders}
 \label{sec:representation}
@@ -69,7 +69,7 @@ Finally, to mitigate this specific optimization bottleneck, we propose FLASH, an
 \subsection{The Myth of Reconstruction Quality}
 A common mistake in recent model-based RL research is the assumption that blurry decoded images imply a lack of information in the latent space. We argue that this is merely a rendering failure of the decoder.
 
-As qualitative evidence, we observe the \textit{temporal persistence of objects} during the \textbf{open-loop imagination phase} in models like DreamerV3 and Drama \todo{해당 논문 인용}. During this phase, the model predicts future states solely based on its internal transition dynamics, without access to real observations. For instance, as shown in Figure~\ref{fig:temporal_persistence}, during an imagined trajectory, a clearly rendered object (e.g., a fish) may blur or disappear from the decoded frame for a timestep (e.g., $t+1$), only to reappear perfectly in its expected trajectory subsequently (e.g., $t+2$). Since the model has no external input to "rediscover" the fish at $t+2$, this phenomenon definitively proves that the ontological information of the object was never lost in the latent states; the transition model successfully propagated it through the sequence, and it was simply a rendering failure of the decoder. Therefore, relying on reconstruction quality is a deceptive metric for evaluating the true capacity of an encoder.
+As qualitative evidence, we observe the \textit{temporal persistence of objects} during the \textbf{open-loop imagination phase} in models like DreamerV3 and Drama \todo{Cite the corresponding paper}. During this phase, the model predicts future states solely based on its internal transition dynamics, without access to real observations. For instance, as shown in Figure~\ref{fig:temporal_persistence}, during an imagined trajectory, a clearly rendered object (e.g., a fish) may blur or disappear from the decoded frame for a timestep (e.g., $t+1$), only to reappear perfectly in its expected trajectory subsequently (e.g., $t+2$). Since the model has no external input to "rediscover" the fish at $t+2$, this phenomenon definitively proves that the ontological information of the object was never lost in the latent states; the transition model successfully propagated it through the sequence, and it was simply a rendering failure of the decoder. Therefore, relying on reconstruction quality is a deceptive metric for evaluating the true capacity of an encoder.
 
 \begin{figure}[h]
 \centering
@@ -118,12 +118,12 @@ As shown in Figure~\ref{fig:heatmaps}, both heatmaps reveal distinct structural 
 \subsection{Probing the Latent Space}
 To verify the latent state $z$ contains important yet small particles like diver, we conducted a probing experiment on the Seaquest environment, known for its extreme sparse rewards and tiny objects. We detached the pre-trained encoder (stopping gradient flow) and trained a lightweight MLP to predict ground-truth RAM states directly from $z$. Crucially, we evaluated a suboptimal seed—one that merely hunts fish and never learns the complex behavior of collecting 6 divers and surfacing.
 
-Our results reveal that the MLP can predict the underlying game state with astonishing accuracy, even from this "failed" agent. Specifically, it achieved \todo{화면 하단 잠수부 개수 분류 정확도 수치} accuracy for counting the number of divers at the bottom, \todo{화면 상 잠수부 존재 여부 분류 정확도 수치} accuracy for detecting the presence of a diver on screen, and a mean squared error of \todo{x,y 좌표 예측 오차 수치} for predicting the exact $(x, y)$ coordinates of the diver. This confirms that the latent space already encapsulates perfect semantic information, irrespective of the decoder's visual output or the actor's behavioral performance.
+Our results reveal that the MLP can predict the underlying game state with astonishing accuracy, even from this "failed" agent. Specifically, it achieved \todo{Accuracy score for classifying the number of divers at the bottom} accuracy for counting the number of divers at the bottom, \todo{Accuracy score for detecting the presence of a diver on screen} accuracy for detecting the presence of a diver on screen, and a mean squared error of \todo{Error score for predicting exact x,y coordinates} for predicting the exact $(x, y)$ coordinates of the diver. This confirms that the latent space already encapsulates perfect semantic information, irrespective of the decoder's visual output or the actor's behavioral performance.
 
 \subsection{Robustness to Spatial Noise: Refuting the Blurring Hypothesis}
-Recent works advocating for Diffusion models \todo{DIAMOND 논문 인용} hypothesize that standard encoders fail because they blur or "entangle" spatial information. To refute this, we injected heavy random noise into the background spaces of the original images, leaving only the diver's position intact.
+Recent works advocating for Diffusion models \todo{Cite DIAMOND paper} hypothesize that standard encoders fail because they blur or "entangle" spatial information. To refute this, we injected heavy random noise into the background spaces of the original images, leaving only the diver's position intact.
 
-If the entanglement hypothesis were true, the extreme noise in other spatial locations would entangle with the diver's features, degrading the probing accuracy. However, our probing MLP, taking the noise-injected $z$ as input, still maintained \todo{노이즈 주입 후 유지된 잠수부 위치/개수 정확도 수치} accuracy. This demonstrates that the encoder possesses robust disentanglement capabilities, completely debunking the claim that spatial entanglement is the root cause of RL failures.
+If the entanglement hypothesis were true, the extreme noise in other spatial locations would entangle with the diver's features, degrading the probing accuracy. However, our probing MLP, taking the noise-injected $z$ as input, still maintained \todo{Accuracy score for diver position/count maintained after noise injection} accuracy. This demonstrates that the encoder possesses robust disentanglement capabilities, completely debunking the claim that spatial entanglement is the root cause of RL failures.
 
 \section{Beyond Representations: The Actor-Critic Optimization Bottleneck}
 \label{sec:bottleneck}
@@ -133,8 +133,8 @@ Having established in Section~\ref{sec:representation} that the encoder already 
 
 \begin{figure}[h]
 \centering
-\todo{시드별로 ``학습 중 최고 에피소드 점수''와 ``최종 평가 점수''를 나란히 비교하는 바 차트 삽입. 괴리가 클수록 exploit 실패를 시각적으로 보여줌.}
-\caption{\todo{각 시드의 학습 중 최고 에피소드 점수 대비 최종 평가 점수를 비교한 그래프. 높은 에피소드 점수를 달성했음에도 최종 평가에서 이를 재현하지 못하는 괴리가 AC 최적화의 exploitation 실패를 보여준다.}}
+\todo{Insert a bar chart comparing "highest episode score during training" and "final evaluation score" side-by-side for each seed. A larger gap visually demonstrates the failure to exploit.}
+\caption{\todo{Graph comparing the highest episode score during training vs. final evaluation score for each seed. The gap, where a high episode score is achieved but not reproduced in the final evaluation, illustrates the exploitation failure of AC optimization.}}
 \label{fig:seed_variance}
 \end{figure}
 
@@ -186,6 +186,7 @@ At each imagination step (where the agent generates imagined trajectories for po
 
 If the average hit rate (fraction of candidates passing re-verification) drops below a threshold $\eta$, a \textbf{Global Rebuild} is triggered: all hash buckets are cleared, the PCA projection $W_{\text{proj}}$ and mean $\mu$ are recomputed from a fresh encoding of the entire replay buffer, and all transitions are re-hashed. This ensures the hash structure stays aligned with the evolving representation, subject to a cooldown period to amortize cost.
 
+%일단 N_rand가 수정된 대로 반영해야 함. 이러면 실질적으로 줄어드는데, 오히려 이래야 하는 이유 설명. 내 기법이 학습을 가속(정확히는 방향이 정확)하므로 액터 크리틱의 학습 속도가 빨라지므로, world model의 학습 속도와 보조를 맞추기 위해서는 실질 영향인 가중치 총합을 좀 줄여야 한다. appendix에 앵커 수만큼만 빼서 가중치 총합을 이전과 동일하게 만들었을 때의 성능 하락 기록. 그냥 imagine batch를 줄이면 성능이 올라가는거 아니냐는 말에 대한 반박으로 imagine batch를 1000으로 감소시킨 것의 성능도 appendix에 기록
 \paragraph{Stage 4: In-batch Injection with Inverse-Group Weighting.}
 For each retrieved group $\mathcal{N}_a$, we extract the preceding $L$-step context window of observations and actions from the replay buffer (validating that no episode termination occurs within the window). Let $N_{\text{ret}} = \sum_{a} |\mathcal{N}_a|$ denote the total number of retrieved contexts (including both anchors and their matched neighbors). These are concatenated with randomly-sampled contexts to form the imagination batch:
 \begin{equation}
@@ -248,7 +249,7 @@ During an initial warmup phase (the first $T_{\text{warm}}$ environment steps), 
 
 \begin{figure}[t]
 \centering
-\todo{Figure~\ref{fig:flash_pipeline}에 들어갈 FLASH 파이프라인 다이어그램을 여기에 삽입해주세요. 아래 묘사를 참고하여 제작하시면 됩니다.}
+\todo{Insert the FLASH pipeline diagram for Figure~\ref{fig:flash_pipeline} here.}
 \caption{Overview of the FLASH pipeline. \textbf{(Left)} During environment interaction, each observation is encoded and hashed into LSH buckets via PCA-adapted projections. \textbf{(Center)} During world model training, TD-error and value-difference z-scores are combined to detect surprise events, triggering anchor registration. \textbf{(Right)} During imagination, anchors retrieve structurally similar contexts via lazy re-verification, which are injected into the training batch with inverse-group weighting. A Global Rebuild periodically realigns the hash structure with the evolving representation.}
 \label{fig:flash_pipeline}
 \end{figure}
@@ -265,7 +266,7 @@ Thus, simply altering the batch composition via retrieval naturally acts as a se
 \subsection{Curriculum Activation}
 Retrieving episodes too early during training, when the world model and representations are still highly unstable, can introduce noisy signals. Therefore, we employ a curriculum activation strategy.
 
-\todo{언제 Retrieval을 활성화하는지 구체적인 스텝 수(예: 20,000 스텝)나 '근처 3개 에피소드 중 최댓값 증가 속도'를 측정하는 정확한 기준 및 수식을 영어로 적어주세요.}
+\todo{Write the exact criteria and formula for when to activate Retrieval, such as specific step count (e.g., 20,000 steps) or measuring the 'rate of increase of the maximum among 3 nearby episodes'.}
 
 \section{Experiments}
 \label{sec:experiments}
@@ -278,39 +279,38 @@ Table~\ref{tab:main_performance} presents the comprehensive Atari 100k results.
 
 \begin{table}[h]
 \centering
-\caption{Atari 100k Benchmark Performance. \todo{아래 표의 STORM, DRAMA, EDELINE 및 +ours 열에 실제 실험 점수 데이터를 모두 채워넣어 주세요.}}
 \label{tab:main_performance}
 \resizebox{\textwidth}{!}{
 \begin{tabular}{lrrrrrrrr}
 \toprule
 Game & Random & Human & STORM & STORM+ours & DRAMA & DRAMA+ours & EDELINE & EDELINE+ours \\
 \midrule
-Alien         & 227.8 & 7127.7 & - & - & - & - & - & - \\
-Amidar        & 5.8 & 1719.5 & - & - & - & - & - & - \\
-Assault       & 222.4 & 742.0 & - & - & - & - & - & - \\
-Asterix       & 210.0 & 8503.3 & - & - & - & - & - & - \\
-BankHeist     & 14.2 & 753.1 & - & - & - & - & - & - \\
-BattleZone    & 2360.0 & 37187.5 & - & - & - & - & - & - \\
-Boxing        & 0.1 & 12.1 & - & - & - & - & - & - \\
+Alien         & 227.8 & 7127.7 & 882.5 & 983 & - & - & - & - \\
+Amidar        & 5.8 & 1719.5 & 191.2 & 215.2 & - & - & - & - \\
+Assault       & 222.4 & 742.0 & 643.7 & 717.5 & - & - & - & - \\
+Asterix       & 210.0 & 8503.3 & 515 & 682.5 & - & - & - & - \\
+BankHeist     & 14.2 & 753.1 & 431 & 415.5 & - & - & - & - \\
+BattleZone    & 2360.0 & 37187.5 & 10600 & 11850 & - & - & - & - \\
+Boxing        & 0.1 & 12.1 & 81 & 86.25 & - & - & - & - \\
 Breakout      & 1.7 & 30.5 & - & - & - & - & - & - \\
-ChopperCommand & 811.0 & 7387.8 & - & - & - & - & - & - \\
+ChopperCommand & 811.0 & 7387.8 & 1960 & 1130 & - & - & - & - \\
 CrazyClimber  & 10780.5 & 35829.4 & - & - & - & - & - & - \\
-DemonAttack   & 152.1 & 1971.0 & - & - & - & - & - & - \\
+DemonAttack   & 152.1 & 1971.0 & 171.75 & 144.5 & - & - & - & - \\
 Freeway       & 0.0 & 29.6 & - & - & - & - & - & - \\
-Frostbite     & 65.2 & 4334.7 & - & - & - & - & - & - \\
-Gopher        & 257.6 & 2412.5 & - & - & - & - & - & - \\
-Hero          & 1027.0 & 30826.4 & - & - & - & - & - & - \\
-Jamesbond     & 29.0 & 302.8 & - & - & - & - & - & - \\
-Kangaroo      & 52.0 & 3035.0 & - & - & - & - & - & - \\
+Frostbite     & 65.2 & 4334.7 & 1627 & 2133 & - & - & - & - \\
+Gopher        & 257.6 & 2412.5 & 4622 & 4061 & - & - & - & - \\
+Hero          & 1027.0 & 30826.4 & 10303 & 10110 & - & - & - & - \\
+Jamesbond     & 29.0 & 302.8 & 490 & 420 & - & - & - & - \\
+Kangaroo      & 52.0 & 3035.0 & 1730 & 1750 & - & - & - & - \\
 Krull         & 1598.0 & 2665.5 & - & - & - & - & - & - \\
 KungFuMaster  & 258.5 & 22736.3 & - & - & - & - & - & - \\
-MsPacman      & 307.3 & 6951.6 & - & - & - & - & - & - \\
+MsPacman      & 307.3 & 6951.6 & 1907 & 1727 & - & - & - & - \\
 Pong          & -20.7 & 14.6 & - & - & - & - & - & - \\
 PrivateEye    & 24.9 & 69571.3 & - & - & - & - & - & - \\
-Qbert         & 163.9 & 13455.0 & - & - & - & - & - & - \\
+Qbert         & 163.9 & 13455.0 & 2779 & 3603 & - & - & - & - \\
 RoadRunner    & 11.5 & 7845.0 & - & - & - & - & - & - \\
-Seaquest      & 68.4 & 42054.7 & - & - & - & - & - & - \\
-UpNDown       & 533.4 & 11693.2 & - & - & - & - & - & - \\
+Seaquest      & 68.4 & 42054.7 & 454 & 523 & - & - & - & - \\
+UpNDown       & 533.4 & 11693.2 & 9044 & 11733 & - & - & - & - \\
 \midrule
 \#Superhuman ($\uparrow$) & 0 & N/A & - & - & - & - & - & - \\
 Mean ($\uparrow$) & 0.000 & 1.000 & - & - & - & - & - & - \\
@@ -324,7 +324,7 @@ Optimality Gap ($\downarrow$) & 1.000 & 0.000 & - & - & - & - & - & - \\
 
 Our initial evaluation reveals that FLASH yields substantial improvements in several environments (e.g., Frostbite, Asterix, Qbert), while showing marginal changes or noise-level variance in others (e.g., Hero, MsPacman, Seaquest). 
 
-\todo{26개 Atari 게임 전체에 대한 실험 결과 데이터가 확보된 후, 어떤 환경적 특성(예: 보상 주기, 탐험 난이도, State Space 복잡도 등)이 FLASH의 성능 향상 유무를 결정짓는지 심층적인 분석(Discussion)을 여기에 작성해주세요. 왜 특정 그룹에서만 성능이 크게 오르는지 객관적인 공통점을 도출해야 합니다.}
+\todo{After securing experimental data for all 26 Atari games, write an in-depth analysis (Discussion) here on which environmental characteristics (e.g., reward frequency, exploration difficulty, state space complexity) determine FLASH's performance improvement. You must derive objective commonalities for why performance significantly increases only in specific groups.}
 
 Overall, the preliminary results indicate that our approach significantly stabilizes the RL optimization process in specific environments, paving the way for a deeper investigation into the structural dependencies of Actor-Critic bottlenecks.
 
@@ -332,8 +332,7 @@ Overall, the preliminary results indicate that our approach significantly stabil
 
 \begin{figure}[h]
 \centering
-\todo{성공적인 탐험 시드가 평가 점수를 대폭 끌어올리는 현상을 보여주는 그래프 이미지 삽입}
-\caption{\todo{탐험에 성공한 시드의 평가 점수(Evaluate Score) 상승 폭을 보여주는 캡션 작성.}}
+\todo{Insert a graph image showing the phenomenon where a successful exploration seed significantly boosts the evaluation score.}
 \label{fig:exploitation_amplifier}
 \end{figure}
 
@@ -352,7 +351,7 @@ The algorithmic time complexity is as follows:
 
 \begin{table}[h]
 \centering
-\caption{\todo{기존 모델과 제안 기법(+ours)의 초당 프레임 처리량(FPS) 또는 총 학습 시간(Training Time)을 비교하는 표를 여기에 직접 만들어주세요.}}
+\caption{\todo{Directly create a table here comparing the Frames Per Second (FPS) or total Training Time between the baseline model and our proposed method (+ours).}}
 \label{tab:efficiency}
 \end{table}
 
@@ -362,8 +361,7 @@ Table~\ref{tab:efficiency} shows the empirical FPS measurements. FLASH delivers 
 
 \begin{figure}[h]
 \centering
-\todo{Train 점수는 낮지만 Evaluation 점수는 월등히 높은 현상을 보여주는 그래프 삽입}
-\caption{\todo{Train과 Evaluation 스코어 갭을 보여주는 캡션 작성.}}
+\todo{Insert a graph showing the phenomenon where the Train score is low but the Evaluation score is remarkably high.}
 \label{fig:train_eval_gap}
 \end{figure}
 
