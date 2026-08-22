@@ -116,7 +116,7 @@ To formally investigate whether the encoder successfully captures functionally c
 As shown in Figure~\ref{fig:heatmaps}, both heatmaps reveal distinct structural patterns rather than a uniform similarity of 1.0. For the diver count (left), states with similar counts exhibit high cosine similarity ($0.93$--$0.98$), while states with larger count differences drop as low as $0.86$. For the diver position (right), we fixed the submarine at the center and moved a single diver from the far left edge to just left of the submarine; as displacement increases, the similarity degrades down to $0.63$. If the encoder had ignored these small, static elements, all similarities would be 1.0. The fact that they dynamically reflect the underlying game state provides a strong clue that the encoder maps these critical features into the latent space, motivating our subsequent probing analysis.
 
 \subsection{Probing the Latent Space}
-To verify the latent state $z$ contains important yet small particles like divers, we conducted a probing experiment on the Seaquest environment, known for its extreme sparse rewards and tiny objects. We detached the pre-trained encoder (stopping gradient flow) and trained a lightweight MLP to predict ground-truth RAM states directly from $z$. Crucially, we evaluated a suboptimal agent—one that merely hunts fish and never learns the complex behavior of collecting 6 divers and surfacing. To test the zero-shot generalization capability of the \textit{encoder}, we extracted latents from manually collected demonstration data containing rare states of 4 to 6 collected divers—states the encoder had never encountered during its own unsupervised pre-training phase. These zero-shot latents were then merged with the agent's standard experience to train the probing MLP.
+To verify the latent state $z$ contains important yet small particles like divers, we conducted a probing experiment on the Seaquest environment, known for its extreme sparse rewards and tiny objects. We detached the pre-trained encoder (stopping gradient flow) and trained a lightweight MLP to predict ground-truth RAM states directly from $z$. Crucially, we evaluated a suboptimal agent—one that merely hunts fish and never learns the complex behavior of collecting 6 divers and surfacing. To test the zero-shot generalization capability of the \textit{encoder}, we extracted latents from manually collected demonstration data containing rare states of 4 to 6 collected divers—states the encoder had never encountered during its own unsupervised pre-training phase. These zero-shot latents were then merged with a newly collected rollout dataset from the trained agent (entirely independent of the encoder's original replay buffer) to train the probing MLP.
 
 Our results reveal that the MLP can predict the underlying game state with astonishing accuracy, even from this "failed" agent's encoder. First, for classifying the number of collected divers at the bottom (0 to 6), the probe achieved an overall accuracy of 99.6\%. Most remarkably, despite the encoder having never seen 4 to 6 divers during its representation learning phase, it successfully mapped these novel observations into highly separable latent clusters, allowing the MLP to correctly classify these rare minority classes with $>93\%$ accuracy.
 
@@ -398,5 +398,32 @@ Additionally, this hardware-level asynchrony provides a strong justification for
 % TODO: /media/storage_data/ai2lab/choemj/STORM/diver_verification_fixed/ 안의 64x64 이미지 몇 장을 첨부하여, 화면 상의 잠수부 위치와 RAM 좌표를 표시한 원의 중심 위치 사이에 원래부터 약간의 오차가 존재한다는 것을 시각적으로 보여주기.
 % TODO: 화면 끝에 살짝 걸쳐서 나오는 잠수부, 또는 잠수함과 충돌 직후 RAM에서는 지워졌지만 화면엔 겹쳐져 남아있는 프레임을 시각화하여 위의 내용 뒷받침하기.
 % (예: \includegraphics 등 LaTeX 문법을 활용해서 여기에 추가할 것)
+
+\section{Detailed Per-Class Probing Accuracy (Clean vs. Noisy)}
+\label{sec:appendix_noise_robustness}
+To further validate the blurring hypothesis discussed in the main text, we provide the detailed per-class accuracy of our probing MLP on the \textit{diver counting} task. Table \ref{tab:per_class_noise} contrasts the probe's performance when trained on clean observations versus observations with extreme background noise. 
+
+In the clean setting, the MLP demonstrates an exceptional ability to classify even the highly imbalanced minority classes (e.g., achieving $>90\%$ accuracy on rare states with 4--6 divers). However, when uniform noise is injected into the background---leaving only the diver bounding box intact---the encoder's spatial entanglement causes this background noise to bleed into the diver representations. Consequently, the MLP completely fails to classify anything other than the dominant class (0 divers), validating that the standard encoder suffers from severe spatial blurring.
+
+\begin{table}[h]
+    \centering
+    \caption{Per-class classification accuracy for bottom diver counting. The clean setting uses the uncorrupted $64 \times 64$ observation, while the noisy setting injects uniform random noise everywhere except the tight bounding box containing the divers. The precipitous drop in minority class accuracy empirically demonstrates spatial entanglement within the frozen encoder.}
+    \label{tab:per_class_noise}
+    \begin{tabular}{crrr}
+        \toprule
+        \textbf{Diver Count} & \textbf{Samples ($n$)} & \textbf{Clean Accuracy (\%)} & \textbf{Noisy Accuracy (\%)} \\
+        \midrule
+        0 & $39,767$ & $99.8$ & $96.9$ \\
+        1 & $17,003$ & $99.3$ & $9.8$ \\
+        2 & $1,374$ & $95.8$ & $0.0$ \\
+        3 & $260$ & $95.4$ & $0.0$ \\
+        4 & $146$ & $95.9$ & $0.0$ \\
+        5 & $417$ & $96.9$ & $0.0$ \\
+        6 & $110$ & $90.9$ & $0.0$ \\
+        \midrule
+        \textbf{Overall} & \textbf{59,077} & \textbf{99.5} & \textbf{68.1} \\
+        \bottomrule
+    \end{tabular}
+\end{table}
 
 \end{document}
