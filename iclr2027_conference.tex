@@ -381,6 +381,8 @@ To empirically evaluate how well FLASH mitigates the ``spatial entanglement'' is
 
 Our primary metric of interest is the per-sequence correlation, which directly quantifies the model's resistance to spatial entanglement. On an individual, per-sequence basis, the Baseline model suffers from near-random correlation ($\rho=0.0668$), proving that it is heavily entangled with the background and cannot reliably isolate the igloo's value in a frozen context. In striking contrast, FLASH more than doubles this per-sequence robustness ($\rho=0.1447$). This significant improvement validates that the retrieval of structurally similar historical anchors acts as an anti-aliasing mechanism, effectively forcing the Actor-Critic to disentangle the local target features from the global noise.
 
+Crucially, this improvement is achieved without modifying the underlying world model encoder. As detailed in Appendix \ref{sec:appendix_noise_robustness_flash}, probing the FLASH encoder directly reveals that its raw latent representations remain just as vulnerable to spatial entanglement as the Baseline. FLASH does not magically fix the encoder's blurring; rather, it provides the necessary contextual gradient catalyst for the Actor-Critic to successfully interpret and disentangle those blurred representations.
+
 Furthermore, we examined the \textit{Global Average Profile} (averaging the value predictions over all 17,496 sequences). The Baseline exhibits an almost perfect linear correlation ($\rho=0.9632$), blindly assuming that more igloo blocks always yield a monotonically higher value. However, FLASH's average profile ($\rho=0.6373$) peaks around Stage 11 and subsequently declines as the igloo nears completion (Stage 16). While seemingly counterintuitive, this decline is a highly sophisticated response to Partial Observability. Because the observations are aggressively downsampled to $64 \times 64$ pixels, the in-game temperature gauge (which serves as the strict time limit) becomes visually illegible, rendering the environment a Partially Observable Markov Decision Process (POMDP). Without direct access to the remaining time, the agent must infer this hidden state from other visual cues. In successful Frostbite trajectories, late-stage igloos (Stages 12--16) overwhelmingly correlate with the temperature nearing zero, placing the agent at imminent risk of death. By retrieving actual episodic memories, FLASH correctly infers this severe survival risk and discounts the value of late-stage igloos, demonstrating a far more nuanced and context-aware value landscape than the Baseline's naive pixel-counting overfit. (See Appendix \ref{sec:appendix_value_robustness} for complete metrics and values).
 
 \section{Conclusion}
@@ -462,6 +464,43 @@ We observe identical phenomena in the Frostbite environment. As shown in Table \
         16 & $294$ & $100.0$ & $77.6$ \\
         \midrule
         \textbf{Overall} & \textbf{1,854} & \textbf{99.2} & \textbf{27.7} \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\section{Probing Accuracy of the FLASH Encoder}
+\label{sec:appendix_noise_robustness_flash}
+To confirm that FLASH operates exclusively by resolving the Actor-Critic optimization bottleneck without altering the foundational representation capacity, we repeated the spatial noise robustness evaluation (from Section \ref{sec:representation}) on the FLASH encoder.
+
+As shown in Table \ref{tab:per_class_noise_flash}, the FLASH encoder exhibits nearly identical behavior to the Baseline encoder. Under clean conditions, it perfectly preserves the 17 igloo construction stages (99.1\% accuracy). However, upon injecting background noise, the probing accuracy catastrophically drops to 27.2\%, suffering from the exact same spatial entanglement as the Baseline (which dropped to 27.7\%). This confirms that the significant robustness improvements observed in the value function (Section 6.6) are purely the result of FLASH's retrieval-augmented Actor-Critic optimization, successfully extracting signal from persistently blurred representations.
+
+\begin{table}[h]
+    \centering
+    \caption{Per-class classification accuracy for igloo construction stages (0--16) in Frostbite using the FLASH encoder. The results mirror the Baseline, confirming the encoder itself remains vulnerable to spatial entanglement.}
+    \label{tab:per_class_noise_flash}
+    \begin{tabular}{crrr}
+        \toprule
+        \textbf{Igloo Stage} & \textbf{Samples ($n$)} & \textbf{Clean Accuracy (\%)} & \textbf{Noisy Accuracy (\%)} \\
+        \midrule
+        0 & $153$ & $100.0$ & $0.0$ \\
+        1 & $26$ & $88.5$ & $0.0$ \\
+        2 & $25$ & $88.0$ & $0.0$ \\
+        3 & $28$ & $96.4$ & $0.0$ \\
+        4 & $77$ & $98.7$ & $0.0$ \\
+        5 & $54$ & $98.1$ & $0.0$ \\
+        6 & $159$ & $100.0$ & $0.6$ \\
+        7 & $377$ & $99.5$ & $77.5$ \\
+        8 & $95$ & $98.9$ & $0.0$ \\
+        9 & $91$ & $98.9$ & $0.0$ \\
+        10 & $121$ & $100.0$ & $0.0$ \\
+        11 & $120$ & $100.0$ & $0.0$ \\
+        12 & $47$ & $97.9$ & $0.0$ \\
+        13 & $89$ & $98.9$ & $0.0$ \\
+        14 & $28$ & $92.9$ & $0.0$ \\
+        15 & $70$ & $100.0$ & $0.0$ \\
+        16 & $294$ & $100.0$ & $71.8$ \\
+        \midrule
+        \textbf{Overall} & \textbf{1,854} & \textbf{99.1} & \textbf{27.2} \\
         \bottomrule
     \end{tabular}
 \end{table}
