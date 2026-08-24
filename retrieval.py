@@ -186,7 +186,7 @@ class RetrievalContextManager:
                         
                         diff = env_mean - self.ema_mean[i]
                         self.ema_mean[i] += self.ema_alpha * diff
-                        self.ema_var[i] = (1 - self.ema_alpha) * (self.ema_var[i] + self.ema_alpha * (env_var + diff**2))
+                        self.ema_var[i] = (1 - self.ema_alpha) * self.ema_var[i] + self.ema_alpha * (env_var + diff**2)
                         
                         env_vd = valid_value_diff[env_mask]
                         env_vd_mean = env_vd.mean().item()
@@ -194,7 +194,7 @@ class RetrievalContextManager:
                         
                         diff_vd = env_vd_mean - self.ema_vd_mean[i]
                         self.ema_vd_mean[i] += self.ema_alpha * diff_vd
-                        self.ema_vd_var[i] = (1 - self.ema_alpha) * (self.ema_vd_var[i] + self.ema_alpha * (env_vd_var + diff_vd**2))
+                        self.ema_vd_var[i] = (1 - self.ema_alpha) * self.ema_vd_var[i] + self.ema_alpha * (env_vd_var + diff_vd**2)
             
             threshold = self.z_score_threshold
         else:

@@ -117,14 +117,14 @@ To efficiently disentangle these blurred states and augment the Actor-Critic opt
 Instead of relying solely on parametric gradient updates, FLASH maintains a lightweight episodic memory indexed by Locality-Sensitive Hashing (LSH) and retrieves structurally similar past contexts to directly augment the Actor-Critic training batch. The pipeline consists of four stages: \textbf{(1) Hashing \& Indexing}, \textbf{(2) Surprise-based Anchor Triggering}, \textbf{(3) Lazy Retrieval with Re-verification}, and \textbf{(4) In-batch Injection with Inverse-Group Weighting}. We describe each stage below and summarize the complete procedure in Algorithm~\ref{alg:flash}. We additionally illustrate the overall architecture in Figure~\ref{fig:flash_pipeline}.
 
 \paragraph{Stage 1: Hashing \& Indexing.}
-At every environment step, the world model encoder $f_\theta$ maps the current observation $o_t$ to a categorical latent representation $z_t = f_\theta(o_t) \in \mathbb{R}^{d}$, where $d = K \times C$ with $K$ categorical variables each of $C$ classes (in practice $K{=}32, C{=}32$, so $d{=}1024$). We apply an LSH function $h: \mathbb{R}^d \to \{0,1,\ldots,2^B{-}1\}$ to produce a discrete hash key:
+At every environment step, the world model encoder $f_\theta$ maps the current observation $o_t$ to a categorical latent representation $z_t = f_\theta(o_t) \in \mathbb{R}^{d}$, where $d = K \times C$ with $K$ categorical variables each of $C$ classes. We apply an LSH function $h: \mathbb{R}^d \to \{0,1,\ldots,2^B{-}1\}$ to produce a discrete hash key:
 \begin{equation}
 h(z_t) = \sum_{i=1}^{B} \mathbf{1}\!\left[\left(W_{\text{proj}}^\top (z_t - \mu)\right)_i > 0\right] \cdot 2^{i-1},
 \label{eq:lsh}
 \end{equation}
-where $B$ is the number of hash bits, $W_{\text{proj}} \in \mathbb{R}^{d \times B}$ is the projection matrix, and $\mu$ is the centering vector. Initially, $W_{\text{proj}}$ is a random Gaussian projection and $\mu = \mathbf{0}$; during \textit{Global Rebuild} (described below), both are updated via PCA on the current buffer's latent distribution to align the hash hyperplanes with the principal axes of variation.
+where $B$ is the number of hash bits, $\mu$ is the centering vector (initially $\mathbf{0}$), and $W_{\text{proj}} \in \mathbb{R}^{d \times B}$ is the projection matrix (initially a random Gaussian projection). During \textit{Global Rebuild} (described below), both are updated via PCA on the current buffer's latent distribution to align the hash hyperplanes with the principal axes of variation.
 
-Each transition pointer $(p_t, e)$---where $p_t$ is the circular buffer index and $e$ is the environment index---is inserted into a hash bucket $\mathcal{B}_{h(z_t)}$. If a pointer's hash key changes (due to Global Rebuild), it is transparently migrated. All bucket operations (insert, delete, lookup) run in amortized $\mathcal{O}(1)$.
+Each transition pointer $(p_t, e)$---where $p_t$ is the circular buffer index and $e$ is the environment index---is inserted into a hash bucket $\mathcal{B}_{h(z_t)}$. If a pointer's hash key changes (due to Global Rebuild), it is transparently migrated.
 
 \paragraph{Stage 2: Surprise-based Anchor Triggering.}
 During each world model training step, FLASH monitors the temporal-difference (TD) error and value difference to detect ``surprise'' events---moments where the agent's value estimate changes abruptly, indicating a potentially pivotal experience. Given a batch of sampled trajectories with value estimates $V(s_t)$ from the critic, we compute:
@@ -135,7 +135,7 @@ During each world model training step, FLASH monitors the temporal-difference (T
 where $r_t$ is the reward, $\gamma$ is the discount factor, and $d_t$ is the termination flag. To normalize across environments with varying reward scales, we maintain per-environment exponential moving averages (EMA) of the mean and variance:
 \begin{align}
 \bar{\mu}_e &\leftarrow (1-\alpha)\bar{\mu}_e + \alpha \cdot \mathbb{E}[\delta^{\text{TD}}_{e}], \quad
-\bar{\sigma}^2_e \leftarrow (1-\alpha)(\bar{\sigma}^2_e + \alpha \cdot \text{Var}[\delta^{\text{TD}}_{e}]), \label{eq:ema_update}
+\bar{\sigma}^2_e \leftarrow (1-\alpha)\bar{\sigma}^2_e + \alpha \cdot \text{Var}[\delta^{\text{TD}}_{e}], \label{eq:ema_update}
 \end{align}
 and analogously for $\Delta V$. The combined surprise metric is:
 \begin{equation}
