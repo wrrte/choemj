@@ -142,37 +142,36 @@ and analogously for $\Delta V$. The combined surprise metric is:
 S_t = \text{ReLU}\!\left(\frac{\delta^{\text{TD}}_t - \bar{\mu}_e}{\sqrt{\bar{\sigma}^2_e} + \epsilon}\right) \cdot \text{softplus}\!\left(\frac{\Delta V_t - \bar{\mu}^{V}_e}{\sqrt{\bar{\sigma}^{2,V}_e} + \epsilon}\right).
 \label{eq:surprise}
 \end{equation}
-This formulation fires only when \textit{both} the TD-error is abnormally large \textit{and} the value is rising, capturing precisely the moments where a high-reward sub-trajectory is first discovered. For each trajectory sequence in the batch, when the maximum surprise score across its time steps exceeds the threshold ($\max_{t \in \text{seq}} S_t > \tau_z$), the corresponding buffer pointer (offset by $\Delta_{\text{anchor}}$ steps to align with the causal context window) is registered as an \textit{active anchor} $a = (p_{t^*+\Delta_\text{anchor}},\, e)$ where $t^* = \text{argmax}_{t \in \text{seq}} S_t$, in a FIFO queue $\mathcal{A}$.
+By pairing a strict ReLU with a softplus, this formulation guarantees that it will never fire unless the TD-error is above average, regardless of how much the value spikes. Conversely, an extremely large TD-error can still trigger the anchor even if the value decreases slightly. This captures precisely the pivotal moments where a highly surprising or high-reward sub-trajectory is first discovered. For each trajectory sequence in the batch, when the maximum surprise score across its time steps exceeds the threshold ($\max_{t \in \text{seq}} S_t > \tau_z$), the corresponding buffer pointer (offset backwards by $\Delta_{\text{anchor}}$ steps to capture the critical preceding actions that caused the surprise; see Appendix~\ref{sec:appendix_causal_anchor} for architectural details) is registered as an \textit{active anchor} $a = (p_{t^*+\Delta_\text{anchor}},\, e)$ where $t^* = \text{argmax}_{t \in \text{seq}} S_t$, in a FIFO queue $\mathcal{A}$.
 
 \paragraph{Stage 3: Lazy Retrieval with Re-verification.}
 At each imagination step (where the agent generates imagined trajectories for policy training), FLASH pops up to $M$ anchors from $\mathcal{A}$. For each anchor $a$ with stored hash key $k_a$, we sample up to $m \times (n{-}1)$ candidate pointers from bucket $\mathcal{B}_{k_a}$ (excluding the anchor itself). To combat \textit{representation drift}---the gradual shift in hash keys as $f_\theta$ evolves---we perform \textbf{lazy re-verification}: each candidate's single-frame observation is re-encoded through the \textit{current} world model, and only candidates whose re-computed hash key matches $k_a$ are retained. This yields a set of verified neighbors $\mathcal{N}_a$ with $|\mathcal{N}_a| \leq n$, including the anchor itself.
 
 If the average hit rate (fraction of candidates passing re-verification) drops below a threshold $\eta$, a \textbf{Global Rebuild} is triggered: all hash buckets are cleared, the PCA projection $W_{\text{proj}}$ and mean $\mu$ are recomputed from a fresh encoding of the entire replay buffer, and all transitions are re-hashed. This ensures the hash structure stays aligned with the evolving representation, subject to a cooldown period to amortize cost.
 
-%일단 N_rand가 수정된 대로 반영해야 함. 이러면 실질적으로 줄어드는데, 오히려 이래야 하는 이유 설명. 내 기법이 학습을 가속(정확히는 방향이 정확)하므로 액터 크리틱의 학습 속도가 빨라지므로, world model의 학습 속도와 보조를 맞추기 위해서는 실질 영향인 가중치 총합을 좀 줄여야 한다. appendix에 앵커 수만큼만 빼서 가중치 총합을 이전과 동일하게 만들었을 때의 성능 하락 기록. 그냥 imagine batch를 줄이면 성능이 올라가는거 아니냐는 말에 대한 반박으로 imagine batch를 1000으로 감소시킨 것의 성능도 appendix에 기록
+
 \paragraph{Stage 4: In-batch Injection with Inverse-Group Weighting.}
 For each retrieved group $\mathcal{N}_a$, we extract the preceding $L$-step context window of observations and actions from the replay buffer (validating that no episode termination occurs within the window). Let $N_{\text{ret}} = \sum_{a} |\mathcal{N}_a|$ denote the total number of retrieved contexts (including both anchors and their matched neighbors). These are concatenated with randomly-sampled contexts to form the imagination batch:
 \begin{equation}
 \mathcal{D}_{\text{imagine}} = \underbrace{\{(o_{t-L:t},\, a_{t-L:t})\}_{i=1}^{N_\text{rand}}}_{\text{random samples}} \;\cup\; \underbrace{\bigcup_{a \in \text{popped}} \{(o^{(j)}_{t-L:t},\, a^{(j)}_{t-L:t})\}_{j \in \mathcal{N}_a}}_{\text{retrieved contexts (anchors + neighbors)}},
 \label{eq:batch_compose}
 \end{equation}
-where $N_{\text{rand}} = \max\big(0,\, N_{\text{total}} - M_{\text{valid}}\big)$, and $M_{\text{valid}} \leq M$ is the number of anchor groups that yield at least one valid context. Because we substitute $M_{\text{valid}}$ random samples with $N_{\text{ret}}$ retrieved contexts (where $N_{\text{ret}} \geq M_{\text{valid}}$), the physical batch size actually expands to $N_{\text{total}} - M_{\text{valid}} + N_{\text{ret}}$.
+where $N_{\text{rand}} = \max\big(0,\, N_{\text{total}} - N_{\text{ret}}\big)$, and $N_{\text{total}}$ is the base imagination batch size. Because we substitute $N_{\text{ret}}$ random samples with $N_{\text{ret}}$ retrieved contexts, the physical batch size is strictly maintained at $N_{\text{total}}$.
 
-To prevent any single anchor group from dominating the gradient, each member within group $\mathcal{N}_a$ receives an \textbf{inverse-group weight} $w_j = 1/|\mathcal{N}_a|$, while every random sample receives $w=1$. This weighting scheme serves two critical purposes:
-\begin{itemize}
-    \item \textbf{Preventing Gradient Domination:} Since members of a retrieved group are sampled from the same hash bucket and could be structurally similar, assigning a full unit weight to each would cause redundantly similar situations to dominate the gradient update. Inverse-group weighting acts as a normalizer to prevent this over-representation.
-    \item \textbf{Maintaining Learning Speed Ratio:} It ensures each group's total weight contribution remains exactly $\sum_{j \in \mathcal{N}_a} w_j = 1$, equivalent to a single random sample. Consequently, the total weight sum across the entire augmented batch is strictly conserved:
-\end{itemize}
+To prevent any single anchor group from dominating the gradient, each member within group $\mathcal{N}_a$ receives an \textbf{inverse-group weight} $w_j = 1/|\mathcal{N}_a|$, while every random sample receives $w=1$. Consequently, the total effective weight sum across the augmented batch becomes:
 \begin{equation}
-W_{\text{sum}} = N_{\text{rand}} + M_{\text{valid}} = N_{\text{total}}.
+W_{\text{sum}} = N_{\text{rand}} + M_{\text{valid}} < N_{\text{total}},
 \label{eq:weight_sum}
 \end{equation}
-All Actor-Critic losses---policy, value, and entropy---are normalized by this constant sum:
+where $M_{\text{valid}}$ is the number of valid anchor groups. Because $N_{\text{ret}} > M_{\text{valid}}$ (due to the inclusion of neighbor contexts), $W_{\text{sum}}$ is intentionally reduced below the original base batch size $N_{\text{total}}$.
+
+All Actor-Critic losses---policy, value, and entropy---are normalized by this reduced sum $W_{\text{sum}}$:
 \begin{equation}
 \mathcal{L}_{\text{AC}} = \frac{1}{W_{\text{sum}}} \sum_{i \in \mathcal{D}_{\text{imagine}}} w_i \left[\mathcal{L}_{\text{actor}}(s_i, a_i) + \mathcal{L}_{\text{critic}}(s_i) - \beta \, \mathcal{H}(\pi(\cdot | s_i))\right].
 \label{eq:weighted_loss}
 \end{equation}
-By keeping $W_{\text{sum}}$ strictly equal to the original $N_{\text{total}}$, we ensure that the learning speed ratio between the world model and the actor-critic remains perfectly balanced, even as the physical batch size expands to absorb the retrieved pivotal experiences.
+
+\textbf{Balancing Learning Speed Ratio:} This deliberate reduction in effective weight is critical. Since FLASH retrieves highly pivotal and structurally aligned states, it provides highly accurate directional gradient signals that significantly accelerate the Actor-Critic optimization. If we were to preserve the total weight (e.g., by setting $N_{\text{rand}} = N_{\text{total}} - M_{\text{valid}}$), the Actor-Critic would learn too rapidly and outpace the World Model, degrading overall performance. Reducing the total effective weight acts as a necessary synchronizer, ensuring the Actor-Critic pace matches the World Model. (We provide detailed ablations validating this weight reduction, including comparisons with a globally reduced random batch, in Appendix~\ref{sec:appendix_ablation_weight}).
 
 \paragraph{Warmup Curriculum.}
 During an initial warmup phase (the first $T_{\text{warm}}$ environment steps), the EMA statistics accumulate but no anchors are triggered and no retrieval occurs. This prevents noisy early-stage value estimates from corrupting the anchor selection process. Retrieval is activated only after the world model and value function have stabilized sufficiently.
@@ -348,8 +347,9 @@ In this paper, we critique the recent trend of obsessing over visual representat
 \bibliographystyle{iclr2027_conference}
 
 \appendix
-\section{Appendix}
-\todo{fill later}
+\section{Implementation Details: Causal Offset in Anchor Registration}
+\label{sec:appendix_causal_anchor}
+In our implementation based on STORM, the world model relies on a prior that predicts the current state based on observations up to the previous time step ($t-1$). Consequently, an abrupt spike in the value estimate or a large TD-error at step $t$ is heavily influenced by the transition dynamics resulting from the action taken at step $t-2$. To ensure that the retrieved context accurately encapsulates this causal action rather than just the resultant state, we specifically set the anchor offset to $\Delta_{\text{anchor}} = -2$. This shifts the retrieval anchor back to the precise moment the agent committed to the pivotal decision.
 
 \section{Irreducible Probing Error due to RAM-Render Misalignment}
 \label{sec:appendix_ram_misalignment}
@@ -362,6 +362,14 @@ Additionally, this hardware-level asynchrony provides a strong justification for
 % TODO: /media/storage_data/ai2lab/choemj/STORM/diver_verification_fixed/ 안의 64x64 이미지 몇 장을 첨부하여, 화면 상의 잠수부 위치와 RAM 좌표를 표시한 원의 중심 위치 사이에 원래부터 약간의 오차가 존재한다는 것을 시각적으로 보여주기.
 % TODO: 화면 끝에 살짝 걸쳐서 나오는 잠수부, 또는 잠수함과 충돌 직후 RAM에서는 지워졌지만 화면엔 겹쳐져 남아있는 프레임을 시각화하여 위의 내용 뒷받침하기.
 % (예: \includegraphics 등 LaTeX 문법을 활용해서 여기에 추가할 것)
+
+\section{Ablation on Batch Weight Reduction and Learning Speed Synchronization}
+\label{sec:appendix_ablation_weight}
+As detailed in Section~\ref{sec:flash_stage4}, our method computes the number of random samples as $N_{\text{rand}} = \max(0, N_{\text{total}} - N_{\text{ret}})$. When combined with inverse-group weighting, this effectively reduces the total weight of the batch $W_{\text{sum}}$ to a value strictly smaller than the base batch size $N_{\text{total}}$.
+
+To validate this design, we evaluated a variant where we only subtracted the number of valid anchors instead of the total retrieved contexts: $N_{\text{rand}} = \max(0, N_{\text{total}} - M_{\text{valid}})$. This alternative perfectly preserves the original total batch weight of $N_{\text{total}}$. However, we observed a significant performance degradation. We hypothesize that because FLASH provides highly focused, directional signals, it substantially accelerates the Actor-Critic optimization. Maintaining the full batch weight causes the Actor-Critic to learn too rapidly, disrupting the synchronization with the World Model's representation learning.
+
+Furthermore, one might ask: \textit{"Does the performance improve simply because the overall batch size is reduced?"} To test this, we ran a standard baseline where $N_{\text{total}}$ was artificially reduced (e.g., from 2000 to 1000) without any retrieval mechanism. This naive reduction did not yield the performance improvements seen with FLASH, confirming that the success of FLASH stems from the high-quality retrieved contexts and the balanced learning speed, rather than merely a smaller batch size.
 
 \section{Detailed Per-Class Probing Accuracy (Clean vs. Noisy)}
 \label{sec:appendix_noise_robustness}
