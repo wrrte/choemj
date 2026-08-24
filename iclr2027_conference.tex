@@ -63,7 +63,7 @@ Finally, to mitigate this specific optimization bottleneck, we propose FLASH, an
 \textbf{Episodic Control and Retrieval-augmented RL.}
 \todo{List previous works using Episodic Memory (e.g., Model-Free Episodic Control, EVA), and explain how FLASH differentiates from them (e.g., explicitly targeting the Actor-Critic bottleneck with extremely low computational cost).}
 
-\section{Are Heavy Representations Necessary?: Decoding the Sufficiency of Encoders}
+\section{Motivation: Re-evaluating Representation and Optimization Bottlenecks}
 \label{sec:representation}
 
 \subsection{The Myth of Reconstruction Quality}
@@ -92,64 +92,15 @@ As qualitative evidence, we observe the \textit{temporal persistence of objects}
 \label{fig:temporal_persistence}
 \end{figure}
 
-\subsection{Preliminary Observation: The Cosine Similarity Clue}
-To formally investigate whether the encoder successfully captures functionally critical, yet small and static elements, we designed a motivating experiment. Instead of a single comparison, we generated two comprehensive sets of images: one varying the number of collected divers at the bottom area (from 0 to 6), and another varying the position of a single diver on the sea area. We then extracted their latent states and computed the pairwise cosine similarities.
+\subsection{Probing the Latent Space: Information Loss vs. Blurring}
+To formally investigate whether standard lightweight encoders successfully capture functionally critical elements, we conducted extensive probing experiments (e.g., diver counting in Seaquest). As detailed in Appendix \ref{sec:appendix_detailed_probing}, our initial probing achieved exceptional accuracy ($>99\%$) on clean observations. However, when we injected extreme uniform noise into the background spaces---leaving only the target bounding box intact---the classification accuracy plummeted drastically. This precipitous drop empirically validates the blurring hypothesis: standard encoders do suffer from spatial entanglement, where global background noise bleeds into and corrupts the local representations. 
 
-\begin{figure}[h]
-\centering
-\begin{minipage}{0.48\textwidth}
-  \centering
-  \includegraphics[width=\linewidth]{heatmap/diver_count.jpg}
-  \caption{Cosine Similarity: Diver Count (0-6)}
-  \label{fig:heatmap_count}
-\end{minipage}\hfill
-\begin{minipage}{0.48\textwidth}
-  \centering
-  \includegraphics[width=\linewidth]{heatmap/diver_location.jpg}
-  \caption{Cosine Similarity: Diver Position}
-  \label{fig:heatmap_position}
-\end{minipage}
-\caption{Cosine similarity heatmaps of latent states in Seaquest. If the lightweight encoder had completely ignored these small, static elements, the similarities would be uniformly 1.0. The distinct structured patterns strongly indicate that the encoder maps these critical features into the latent space.}
-\label{fig:heatmaps}
-\end{figure}
+Crucially, however, our pristine clean accuracy proves that the essential semantic information is \textit{not} fundamentally lost or erased by the encoder; it is merely \textit{blurred} across the latent space. If information were truly lost, replacing the heavy encoder (e.g., via Diffusion models) would be the \textit{only} viable solution. But because it is merely blurred, we hypothesize that the immediate failure actually stems from the downstream components' inability to extract and utilize these entangled representations, presenting an opportunity for optimization-level interventions.
 
-As shown in Figure~\ref{fig:heatmaps}, both heatmaps reveal distinct structural patterns rather than a uniform similarity of 1.0. For the diver count (left), states with similar counts exhibit high cosine similarity ($0.93$--$0.98$), while states with larger count differences drop as low as $0.86$. For the diver position (right), we fixed the submarine at the center and moved a single diver from the far left edge to just left of the submarine; as displacement increases, the similarity degrades down to $0.63$. If the encoder had ignored these small, static elements, all similarities would be 1.0. The fact that they dynamically reflect the underlying game state provides a strong clue that the encoder maps these critical features into the latent space, motivating our subsequent probing analysis.
+\subsection{The Actor-Critic Optimization Bottleneck}
+Having established that the necessary information remains preserved (albeit entangled) in the latent space, we hypothesize that the downstream Actor-Critic optimization process is the primary bottleneck. We observe extreme performance variance across different random seeds in standard setups: even when some seeds discover high-reward trajectories during early exploration, the Actor-Critic often fails to fully capitalize on them, resulting in evaluation scores far below the potential suggested by its best episodes (see Appendix \ref{sec:appendix_ac_bottleneck}). Furthermore, traditional Actor-Critic architectures struggle to efficiently stabilize and learn from rare, high-variance value spikes that occur upon discovering delayed rewards. 
 
-\subsection{Probing the Latent Space}
-To verify the latent state $z$ contains important yet small particles like divers, we conducted a probing experiment on the Seaquest environment, known for its extreme sparse rewards and tiny objects. We detached the pre-trained encoder (stopping gradient flow) and trained a lightweight MLP to predict ground-truth RAM states directly from $z$. Crucially, we evaluated a suboptimal agent—one that merely hunts fish and never learns the complex behavior of collecting 6 divers and surfacing. To test the zero-shot generalization capability of the \textit{encoder}, we extracted latents from manually collected demonstration data containing rare states of 4 to 6 collected divers—states the encoder had never encountered during its own unsupervised pre-training phase. These zero-shot latents were then merged with a newly collected rollout dataset from the trained agent (entirely independent of the encoder's original replay buffer) to train the probing MLP.
-
-Our results reveal that the MLP can predict the underlying game state with astonishing accuracy, even from this "failed" agent's encoder. First, for classifying the number of collected divers at the bottom (0 to 6), the probe achieved an overall accuracy of 99.6\%. Most remarkably, despite the encoder having never seen 4 to 6 divers during its representation learning phase, it successfully mapped these novel observations into highly separable latent clusters, allowing the MLP to correctly classify these rare minority classes with $>93\%$ accuracy.
-
-Second, we tasked the probe with predicting the exact $(x, y)$ coordinates of multiple dynamic divers swimming on the screen. Since up to 4 divers can appear simultaneously, simply assigning fixed output slots to specific lanes introduces a structural bias. To ensure a strictly fair evaluation, we formulated this as a Set Prediction problem and employed a Permutation-Invariant Bipartite Matching Loss, inspired by modern object detection frameworks like DETR. The MLP was forced to output an unordered set of 4 object predictions (presence probability and coordinates), which were then optimally matched to the ground-truth divers via Hungarian matching. Using this rigorous setup, the probe achieved $92.4\%$ accuracy for predicting diver presence, and an average spatial error of $12.44$ pixels for pinpointing their precise $(x, y)$ locations. This confirms that the latent space perfectly encapsulates structured, disentangled spatial semantics of multiple objects, completely refuting the assumption that poor decoder reconstructions imply missing latent information.
-
-It is important to acknowledge that the Atari 2600 emulator exhibits an intrinsic temporal and spatial misalignment between the internal RAM state and the rendered visual frame. For instance, when the submarine collects a diver, the RAM counter increments immediately, but the visual rendering of the diver often persists on the screen for an additional frame before being visually absorbed. Similarly, minor discrepancies exist between the exact pixel locations of moving sprites and their corresponding RAM values due to the Atari hardware's rendering cycle. These hardware-level asynchronies impose an irreducible upper bound on probing accuracy. We strongly argue that any residual errors---such as the remaining $0.4\%$ error in diver counting and the $\sim 12.44$ pixel distance error (which translates to less than 5 pixels on the $64 \times 64$ encoder input space) in multi-diver spatial localization---are largely attributable to this emulator-level label noise rather than missing latent information (see Appendix \ref{sec:appendix_ram_misalignment} for a detailed visual verification).
-
-\subsection{Robustness to Spatial Noise: Validating the Blurring Hypothesis}
-Recent works advocating for Diffusion models \todo{Cite DIAMOND paper} hypothesize that standard encoders (e.g., those relying on discrete tokenization or patch-based CNN/ViT architectures) fail to preserve small visual details because they "blur" or "entangle" spatial information. To rigorously test this hypothesis, we injected extreme random uniform noise into the background spaces of the original observations, leaving only the bounding box of the target objects perfectly intact. We conducted this experiment across two distinct domains: classifying the number of bottom divers in Seaquest, and classifying the igloo construction stages (0--16 blocks) in Frostbite.
-
-If the latent representations were perfectly disentangled, the extreme noise in other spatial locations would not interfere with the local target features, and probing accuracy would remain pristine. However, when evaluated on these noise-injected images, our probing MLP's classification accuracy plummeted drastically. In Seaquest, accuracy dropped from $99.6\%$ (clean) to $68.1\%$ (effectively random chance, as it converged to predicting the majority class). We observed an even more dramatic collapse in Frostbite, where the accuracy for predicting the igloo stage fell from a pristine $99.2\%$ down to $27.7\%$ upon background noise injection. This precipitous drop empirically validates the blurring hypothesis: standard encoders \textit{do} suffer from spatial entanglement. The global background noise inevitably bleeds into and corrupts the local representations of the target objects, likely through overlapping receptive fields or global normalization operations.
-
-Crucially, however, our prior finding ($99.6\%$ clean accuracy) proved that the essential semantic information is \textit{not} fundamentally lost or erased by the encoder; it is merely \textit{blurred} across the latent space. This distinction is paramount. We fully acknowledge that replacing the encoder with a topology-preserving, high-fidelity alternative (such as a Diffusion model) is a fundamental and effective solution to address this blurring issue. However, at present, such generative models incur prohibitive computational costs and severe latency. 
-
-By distinguishing between ``information loss'' and ``information blurring,'' we challenge the prevailing prejudice that modifying the encoder is the \textit{only} viable solution. Because the information remains perfectly preserved (albeit entangled) in the lightweight encoder's latent space, the immediate failure actually stems from the Actor-Critic's inability to extract and utilize these entangled representations. This critical insight motivates our proposed method, FLASH. Instead of fixing the blur at the encoder level with massive overhead, FLASH attacks the problem at the Actor-Critic optimization level. By retrieving structurally aliased historical contexts and injecting them into the same training batch, FLASH naturally pressures the Actor-Critic to closely contrast and disentangle subtle differences between highly similar, blurred states, achieving robust performance with near-zero time delay.
-
-\section{Beyond Representations: The Actor-Critic Optimization Bottleneck}
-\label{sec:bottleneck}
-
-\subsection{Insufficient Exploitation of Successful Trajectories}
-Having established in Section~\ref{sec:representation} that the encoder already captures rich semantic information, we now investigate the downstream optimization process. We observe that even when some seeds discover high-reward trajectories during training, the Actor-Critic often fails to fully capitalize on them, resulting in evaluation scores far below the potential suggested by its best episodes.
-
-\begin{figure}[h]
-\centering
-\todo{Insert a bar chart comparing "highest episode score during training" and "final evaluation score" side-by-side for each seed. A larger gap visually demonstrates the failure to exploit.}
-\caption{\todo{Graph comparing the highest episode score during training vs. final evaluation score for each seed. The gap, where a high episode score is achieved but not reproduced in the final evaluation, illustrates the exploitation failure of AC optimization.}}
-\label{fig:seed_variance}
-\end{figure}
-
-As shown in Figure~\ref{fig:seed_variance}, despite access to the same high-quality representations, evaluation scores vary dramatically across seeds. This gap between the best episodes encountered during training and the final evaluation performance reveals that the Actor-Critic optimization process is the primary bottleneck\u2014not in its ability to represent the world, but in its ability to \textit{exploit} what it has already discovered. This observation directly motivates the design of an exploitation amplifier.
-
-\subsection{The Challenge of Delayed Rewards and Value Spikes}
-Environments like Seaquest or Frostbite often require the agent to complete complex sub-goals (e.g., collecting multiple divers or building an igloo) before receiving a massive reward. In such scenarios, the agent may occasionally stumble upon a breakthrough during random exploration, causing a sudden, massive spike in the true state value. Traditional Actor-Critic architectures struggle to efficiently stabilize and learn from these rare, high-variance value spikes, often losing the critical exploratory signal in the noise of standard transitions.
+This confirms our hypothesis that the true bottleneck lies not in the representation capacity, but in the policy's inability to disentangle blurred states and exploit successful trajectories. This critical insight directly motivates our proposed method, FLASH, which attacks the problem precisely at the Actor-Critic optimization level.
 
 \section{Proposed Method: FLASH (Fast Latent Anchor Search with Hashing)}
 \label{sec:method}
@@ -470,7 +421,7 @@ We observe identical phenomena in the Frostbite environment. As shown in Table \
 
 \section{Probing Accuracy of the FLASH Encoder}
 \label{sec:appendix_noise_robustness_flash}
-To confirm that FLASH operates exclusively by resolving the Actor-Critic optimization bottleneck without altering the foundational representation capacity, we repeated the spatial noise robustness evaluation (from Section \ref{sec:representation}) on the FLASH encoder.
+To confirm that FLASH operates exclusively by resolving the Actor-Critic optimization bottleneck without altering the foundational representation capacity, we repeated the spatial noise robustness evaluation (from Section \ref{sec:motivation}) on the FLASH encoder.
 
 As shown in Table \ref{tab:per_class_noise_flash}, the FLASH encoder exhibits nearly identical behavior to the Baseline encoder. Under clean conditions, it perfectly preserves the 17 igloo construction stages (99.1\% accuracy). However, upon injecting background noise, the probing accuracy catastrophically drops to 27.2\%, suffering from the exact same spatial entanglement as the Baseline (which dropped to 27.7\%). This confirms that the significant robustness improvements observed in the value function (Section 6.6) are purely the result of FLASH's retrieval-augmented Actor-Critic optimization, successfully extracting signal from persistently blurred representations.
 
@@ -553,5 +504,86 @@ This section provides the complete quantitative results for the value function r
         \bottomrule
     \end{tabular}
 \end{table}
+
+\subsection{Insufficient Exploitation of Successful Trajectories}
+Having established in Section~\ref{sec:representation} that the encoder already captures rich semantic information, we now investigate the downstream optimization process. We observe that even when some seeds discover high-reward trajectories during training, the Actor-Critic often fails to fully capitalize on them, resulting in evaluation scores far below the potential suggested by its best episodes.
+
+\begin{figure}[h]
+\centering
+\todo{Insert a bar chart comparing "highest episode score during training" and "final evaluation score" side-by-side for each seed. A larger gap visually demonstrates the failure to exploit.}
+\caption{\todo{Graph comparing the highest episode score during training vs. final evaluation score for each seed. The gap, where a high episode score is achieved but not reproduced in the final evaluation, illustrates the exploitation failure of AC optimization.}}
+\label{fig:seed_variance}
+\end{figure}
+
+As shown in Figure~\ref{fig:seed_variance}, despite access to the same high-quality representations, evaluation scores vary dramatically across seeds. This gap between the best episodes encountered during training and the final evaluation performance reveals that the Actor-Critic optimization process is the primary bottleneck\u2014not in its ability to represent the world, but in its ability to \textit{exploit} what it has already discovered. This observation directly motivates the design of an exploitation amplifier.
+
+\subsection{The Challenge of Delayed Rewards and Value Spikes}
+Environments like Seaquest or Frostbite often require the agent to complete complex sub-goals (e.g., collecting multiple divers or building an igloo) before receiving a massive reward. In such scenarios, the agent may occasionally stumble upon a breakthrough during random exploration, causing a sudden, massive spike in the true state value. Traditional Actor-Critic architectures struggle to efficiently stabilize and learn from these rare, high-variance value spikes, often losing the critical exploratory signal in the noise of standard transitions.
+
+\section{Detailed Probing Experiments and Robustness Analysis}
+\label{sec:appendix_detailed_probing}
+This section provides the comprehensive experimental setup and extended results for the probing and noise injection experiments summarized in Section 3.2.
+
+\subsection{Preliminary Observation: The Cosine Similarity Clue}
+To formally investigate whether the encoder successfully captures functionally critical, yet small and static elements, we designed a motivating experiment. Instead of a single comparison, we generated two comprehensive sets of images: one varying the number of collected divers at the bottom area (from 0 to 6), and another varying the position of a single diver on the sea area. We then extracted their latent states and computed the pairwise cosine similarities.
+
+\begin{figure}[h]
+\centering
+\begin{minipage}{0.48\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{heatmap/diver_count.jpg}
+  \caption{Cosine Similarity: Diver Count (0-6)}
+  \label{fig:heatmap_count}
+\end{minipage}\hfill
+\begin{minipage}{0.48\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{heatmap/diver_location.jpg}
+  \caption{Cosine Similarity: Diver Position}
+  \label{fig:heatmap_position}
+\end{minipage}
+\caption{Cosine similarity heatmaps of latent states in Seaquest. If the lightweight encoder had completely ignored these small, static elements, the similarities would be uniformly 1.0. The distinct structured patterns strongly indicate that the encoder maps these critical features into the latent space.}
+\label{fig:heatmaps}
+\end{figure}
+
+As shown in Figure~\ref{fig:heatmaps}, both heatmaps reveal distinct structural patterns rather than a uniform similarity of 1.0. For the diver count (left), states with similar counts exhibit high cosine similarity ($0.93$--$0.98$), while states with larger count differences drop as low as $0.86$. For the diver position (right), we fixed the submarine at the center and moved a single diver from the far left edge to just left of the submarine; as displacement increases, the similarity degrades down to $0.63$. If the encoder had ignored these small, static elements, all similarities would be 1.0. The fact that they dynamically reflect the underlying game state provides a strong clue that the encoder maps these critical features into the latent space, motivating our subsequent probing analysis.
+
+\subsection{Probing the Latent Space}
+To verify the latent state $z$ contains important yet small particles like divers, we conducted a probing experiment on the Seaquest environment, known for its extreme sparse rewards and tiny objects. We detached the pre-trained encoder (stopping gradient flow) and trained a lightweight MLP to predict ground-truth RAM states directly from $z$. Crucially, we evaluated a suboptimal agent—one that merely hunts fish and never learns the complex behavior of collecting 6 divers and surfacing. To test the zero-shot generalization capability of the \textit{encoder}, we extracted latents from manually collected demonstration data containing rare states of 4 to 6 collected divers—states the encoder had never encountered during its own unsupervised pre-training phase. These zero-shot latents were then merged with a newly collected rollout dataset from the trained agent (entirely independent of the encoder's original replay buffer) to train the probing MLP.
+
+Our results reveal that the MLP can predict the underlying game state with astonishing accuracy, even from this "failed" agent's encoder. First, for classifying the number of collected divers at the bottom (0 to 6), the probe achieved an overall accuracy of 99.6\%. Most remarkably, despite the encoder having never seen 4 to 6 divers during its representation learning phase, it successfully mapped these novel observations into highly separable latent clusters, allowing the MLP to correctly classify these rare minority classes with $>93\%$ accuracy.
+
+Second, we tasked the probe with predicting the exact $(x, y)$ coordinates of multiple dynamic divers swimming on the screen. Since up to 4 divers can appear simultaneously, simply assigning fixed output slots to specific lanes introduces a structural bias. To ensure a strictly fair evaluation, we formulated this as a Set Prediction problem and employed a Permutation-Invariant Bipartite Matching Loss, inspired by modern object detection frameworks like DETR. The MLP was forced to output an unordered set of 4 object predictions (presence probability and coordinates), which were then optimally matched to the ground-truth divers via Hungarian matching. Using this rigorous setup, the probe achieved $92.4\%$ accuracy for predicting diver presence, and an average spatial error of $12.44$ pixels for pinpointing their precise $(x, y)$ locations. This confirms that the latent space perfectly encapsulates structured, disentangled spatial semantics of multiple objects, completely refuting the assumption that poor decoder reconstructions imply missing latent information.
+
+It is important to acknowledge that the Atari 2600 emulator exhibits an intrinsic temporal and spatial misalignment between the internal RAM state and the rendered visual frame. For instance, when the submarine collects a diver, the RAM counter increments immediately, but the visual rendering of the diver often persists on the screen for an additional frame before being visually absorbed. Similarly, minor discrepancies exist between the exact pixel locations of moving sprites and their corresponding RAM values due to the Atari hardware's rendering cycle. These hardware-level asynchronies impose an irreducible upper bound on probing accuracy. We strongly argue that any residual errors---such as the remaining $0.4\%$ error in diver counting and the $\sim 12.44$ pixel distance error (which translates to less than 5 pixels on the $64 \times 64$ encoder input space) in multi-diver spatial localization---are largely attributable to this emulator-level label noise rather than missing latent information (see Appendix \ref{sec:appendix_ram_misalignment} for a detailed visual verification).
+
+\subsection{Robustness to Spatial Noise: Validating the Blurring Hypothesis}
+Recent works advocating for Diffusion models \todo{Cite DIAMOND paper} hypothesize that standard encoders (e.g., those relying on discrete tokenization or patch-based CNN/ViT architectures) fail to preserve small visual details because they "blur" or "entangle" spatial information. To rigorously test this hypothesis, we injected extreme random uniform noise into the background spaces of the original observations, leaving only the bounding box of the target objects perfectly intact. We conducted this experiment across two distinct domains: classifying the number of bottom divers in Seaquest, and classifying the igloo construction stages (0--16 blocks) in Frostbite.
+
+If the latent representations were perfectly disentangled, the extreme noise in other spatial locations would not interfere with the local target features, and probing accuracy would remain pristine. However, when evaluated on these noise-injected images, our probing MLP's classification accuracy plummeted drastically. In Seaquest, accuracy dropped from $99.6\%$ (clean) to $68.1\%$ (effectively random chance, as it converged to predicting the majority class). We observed an even more dramatic collapse in Frostbite, where the accuracy for predicting the igloo stage fell from a pristine $99.2\%$ down to $27.7\%$ upon background noise injection. This precipitous drop empirically validates the blurring hypothesis: standard encoders \textit{do} suffer from spatial entanglement. The global background noise inevitably bleeds into and corrupts the local representations of the target objects, likely through overlapping receptive fields or global normalization operations.
+
+Crucially, however, our prior finding ($99.6\%$ clean accuracy) proved that the essential semantic information is \textit{not} fundamentally lost or erased by the encoder; it is merely \textit{blurred} across the latent space. This distinction is paramount. We fully acknowledge that replacing the encoder with a topology-preserving, high-fidelity alternative (such as a Diffusion model) is a fundamental and effective solution to address this blurring issue. However, at present, such generative models incur prohibitive computational costs and severe latency. 
+
+By distinguishing between ``information loss'' and ``information blurring,'' we challenge the prevailing prejudice that modifying the encoder is the \textit{only} viable solution. Because the information remains perfectly preserved (albeit entangled) in the lightweight encoder's latent space, the immediate failure actually stems from the Actor-Critic's inability to extract and utilize these entangled representations. This critical insight motivates our proposed method, FLASH. Instead of fixing the blur at the encoder level with massive overhead, FLASH attacks the problem at the Actor-Critic optimization level. By retrieving structurally aliased historical contexts and injecting them into the same training batch, FLASH naturally pressures the Actor-Critic to closely contrast and disentangle subtle differences between highly similar, blurred states, achieving robust performance with near-zero time delay.
+
+\section{Extended Analysis of the Actor-Critic Bottleneck}
+\label{sec:appendix_ac_bottleneck}
+This section provides further details and visualizations regarding the exploitation failure and value spike challenges summarized in Section 3.3.
+
+\label{sec:bottleneck}
+
+\subsection{Insufficient Exploitation of Successful Trajectories}
+Having established in Section~\ref{sec:representation} that the encoder already captures rich semantic information, we now investigate the downstream optimization process. We observe that even when some seeds discover high-reward trajectories during training, the Actor-Critic often fails to fully capitalize on them, resulting in evaluation scores far below the potential suggested by its best episodes.
+
+\begin{figure}[h]
+\centering
+\todo{Insert a bar chart comparing "highest episode score during training" and "final evaluation score" side-by-side for each seed. A larger gap visually demonstrates the failure to exploit.}
+\caption{\todo{Graph comparing the highest episode score during training vs. final evaluation score for each seed. The gap, where a high episode score is achieved but not reproduced in the final evaluation, illustrates the exploitation failure of AC optimization.}}
+\label{fig:seed_variance}
+\end{figure}
+
+As shown in Figure~\ref{fig:seed_variance}, despite access to the same high-quality representations, evaluation scores vary dramatically across seeds. This gap between the best episodes encountered during training and the final evaluation performance reveals that the Actor-Critic optimization process is the primary bottleneck\u2014not in its ability to represent the world, but in its ability to \textit{exploit} what it has already discovered. This observation directly motivates the design of an exploitation amplifier.
+
+\subsection{The Challenge of Delayed Rewards and Value Spikes}
+Environments like Seaquest or Frostbite often require the agent to complete complex sub-goals (e.g., collecting multiple divers or building an igloo) before receiving a massive reward. In such scenarios, the agent may occasionally stumble upon a breakthrough during random exploration, causing a sudden, massive spike in the true state value. Traditional Actor-Critic architectures struggle to efficiently stabilize and learn from these rare, high-variance value spikes, often losing the critical exploratory signal in the noise of standard transitions.
 
 \end{document}
