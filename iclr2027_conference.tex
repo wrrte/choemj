@@ -158,7 +158,7 @@ For each retrieved group $\mathcal{N}_a$, we extract the preceding $L$-step cont
 \end{equation}
 where $N_{\text{rand}} = \max\big(0,\, N_{\text{total}} - N_{\text{ret}}\big)$, and $N_{\text{total}}$ is the base imagination batch size. Because we substitute $N_{\text{ret}}$ random samples with $N_{\text{ret}}$ retrieved contexts, the physical batch size is strictly maintained at $N_{\text{total}}$.
 
-To prevent any single anchor group from dominating the gradient, each member within group $\mathcal{N}_a$ receives an \textbf{inverse-group weight} $w_j = 1/|\mathcal{N}_a|$, while every random sample receives $w=1$. Consequently, the total effective weight sum across the augmented batch becomes:
+To prevent any single anchor group from dominating the gradient---especially in the case of Constructive Alignment---each member within group $\mathcal{N}_a$ receives an \textbf{inverse-group weight} $w_j = 1/|\mathcal{N}_a|$, while every random sample receives $w=1$. Consequently, the total effective weight sum across the augmented batch becomes:
 \begin{equation}
 W_{\text{sum}} = N_{\text{rand}} + M_{\text{valid}} < N_{\text{total}},
 \label{eq:weight_sum}
@@ -222,23 +222,25 @@ A core strength of FLASH is how it empowers the Actor-Critic to ``unblur'' entan
 FLASH overcomes this optimization bottleneck by retrieving these aliased historical states and injecting them into the \textit{exact same training batch}. This creates a powerful bifurcated gradient effect:
 \begin{itemize}
     \item \textbf{Constructive Alignment:} If the states are genuinely similar in both structure and value, processing them simultaneously smoothly aligns their value estimates, reinforcing a stable learning signal.
-    \item \textbf{Destructive Separation (Anti-Aliasing):} If the states are structurally aliased but hold different semantic values (e.g., one state recently achieved a sparse reward), placing them in the same batch forces a massive contrastive gradient. To minimize the joint loss, the network can no longer rely on dominant shared features. Instead, it is mathematically forced to look deeper into the latent vector and actively disentangle the blurred dimensions to differentiate the values in a single forward-backward pass.
+    \item \textbf{Destructive Separation (Anti-Aliasing):} If the states are structurally aliased but hold different semantic values (e.g., one state recently achieved a sparse reward), standard encoders often take the path of least resistance by collapsing their representations and predicting an ``averaged'' value to minimize expected loss. By placing them in the exact same batch, FLASH creates a massive contrastive gradient. The network can no longer settle for this blurred average; to minimize the joint loss, it is mathematically forced to analyze the subtle differences between the states and actively disentangle the latent dimensions to differentiate their values in a single forward-backward pass.
 \end{itemize}
 
 This mechanism effectively explains the discrepancy in our empirical results across different environments. In games like \textit{Frostbite}, occasional successes (e.g., building an igloo) provide strong, distinct value spikes. FLASH pairs these high-value states with aliased low-value states in the same batch, providing the necessary gradient catalyst for the Actor-Critic to successfully ``unblur'' the representation. Conversely, in extreme sparse reward games like \textit{Seaquest}, the agent may never randomly discover the terminal reward (e.g., collecting 6 divers and surfacing). Without this critical value spike, there is no strong gradient catalyst to force Destructive Separation. Even if FLASH groups 3-diver and 4-diver states together, their target values remain uniformly near zero, yielding no pressure to disentangle the blur. This highlights that FLASH is not a substitute for initial exploration, but an exceptionally efficient ``Exploitation Amplifier'' that extracts maximum utility from blurred representations once a reward signal is discovered.
 \subsection{Curriculum Activation}
-Retrieving episodes too early during training, when the world model and representations are still highly unstable, can introduce noisy signals. Therefore, we employ a curriculum activation strategy.
+Retrieving episodes too early during training, when the world model and representations are still highly unstable, can introduce noisy signals. Therefore, we employ a curriculum activation strategy. Currently, we activate retrieval at 50,000 steps, which corresponds to exactly half of the total training steps.
 
-\todo{Write the exact criteria and formula for when to activate Retrieval, such as specific step count (e.g., 20,000 steps) or measuring the 'rate of increase of the maximum among 3 nearby episodes'.}
+\todo{Change mechanism if there are better mechanism. Currently experimenting with a dynamic activation technique that fluidly adjusts the activation timing by tuning hyperparameters and monitoring performance metrics (e.g., reward increases).}
 
 \section{Experiments}
 \label{sec:experiments}
 
 \subsection{Experimental Setup}
-We evaluate our method across all 26 games of the Atari 100k benchmark. This diverse suite of environments allows us to comprehensively assess the general applicability and robustness of our approach under varying reward structures, dynamics, and exploration difficulties.
+We evaluate our method across all 26 games of the Atari 100k benchmark.
 
 \subsection{Main Performance}
 Table~\ref{tab:main_performance} presents the comprehensive Atari 100k results. 
+
+\todo{성능이 늘어간 건 파란색, 줄어든 건 뻘건색 등으로 표기}
 
 \begin{table}[h]
 \centering
@@ -295,7 +297,7 @@ Overall, the preliminary results indicate that our approach significantly stabil
 
 \begin{figure}[h]
 \centering
-\todo{Insert a graph image showing the phenomenon where a successful exploration seed significantly boosts the evaluation score.}
+\todo{Insert a 2x2 grid of learning curve graphs, overlaying FLASH and Baseline on each plot. Rows: Successful vs. Failed Seed. Columns: Episode Score vs. Evaluation Score. Expected trends to highlight: 'Episode Score' remains similar between FLASH and Baseline regardless of the seed. However, for the 'Evaluation Score' on a 'Successful Seed', FLASH should significantly outperform the Baseline by the final step. Since we only have final evaluation scores currently, make sure to measure and plot intermediate evaluation scores throughout training to clearly show this divergence.}
 \label{fig:exploitation_amplifier}
 \end{figure}
 
@@ -304,12 +306,12 @@ A key property of FLASH is its ability to act as an "Exploitation Amplifier." As
 \subsection{Computational Efficiency: Negligible Overhead}
 Because FLASH focuses solely on optimizing the Actor-Critic training rather than modifying the heavy representation models, it adds practically zero computational burden to the base model. 
 
-The algorithmic time complexity is as follows:
+Since the latent dimension ($d$), hash bits ($B$), and other hyperparameters (e.g., context lengths, batch sizes) are strictly bounded constants, the algorithmic time complexity simplifies as follows:
 \begin{itemize}
-    \item Insertion per frame: $\mathcal{O}(d \cdot B) \approx \mathcal{O}(1)$. The representation encoding cost $\mathcal{O}(|f_\theta|)$ is completely absorbed since the world model inherently computes the latent state during environment interaction. Because the latent dimension $d$ and hash bits $B$ are small fixed parameters, this operates in effectively constant time.
-    \item Global Rebuild: $\mathcal{O}(N_{\text{buf}} d^2 + d^3 + N_{\text{buf}} d B) \approx \mathcal{O}(N_{\text{buf}})$. Even though PCA is computed over the entire replay buffer, the latent dimensions $d$ and hash bits $B$ are fixed, so the overall operation scales linearly only with the buffer size $N_{\text{buf}}$. Furthermore, Global Rebuild is not executed every step; it is only triggered occasionally when the lazy rebuild hit-rate drops, making its amortized cost negligibly small.
-    \item Retrieval step: $\mathcal{O}\big(M m n (|f_\theta| + d \cdot B) + M n L\big) \approx \mathcal{O}(1)$. The maximum number of anchors $M$, candidates $m \times n$, and context length $L$ are strictly bounded hyperparameters. Thus, the verification and extraction process runs in constant $\mathcal{O}(1)$ time.
-    \item Anchor Triggering: $\mathcal{O}(N_{\text{batch}} \cdot L_{\text{seq}}) \approx \mathcal{O}(1)$. Performing lightweight TD-error and EMA-based Z-score tracking over the imagined sequences requires no additional neural network forward passes. Since the batch size and sequence length are fixed, the overhead is constant per step.
+    \item \textbf{Insertion per frame:} $\mathcal{O}(d \cdot B) \approx \mathcal{O}(1)$. The state encoding cost is completely absorbed by the world model's inherent forward pass.
+    \item \textbf{Global Rebuild:} $\mathcal{O}(N_{\text{buf}} d^2 + d^3 + N_{\text{buf}} d B) \approx \mathcal{O}(N_{\text{buf}})$. Scales linearly with buffer size $N_{\text{buf}}$. Triggered rarely via the lazy rebuild threshold, making its amortized cost negligibly small.
+    \item \textbf{Retrieval step:} $\mathcal{O}\big(M m n (|f_\theta| + d \cdot B) + M n L\big) \approx \mathcal{O}(1)$. Re-verification and extraction overhead is minimal and strictly bounded.
+    \item \textbf{Anchor Triggering:} $\mathcal{O}(N_{\text{batch}} \cdot L_{\text{seq}}) \approx \mathcal{O}(1)$. Lightweight Z-score tracking requires no additional neural network passes.
 \end{itemize}
 
 \begin{table}[h]
@@ -318,17 +320,7 @@ The algorithmic time complexity is as follows:
 \label{tab:efficiency}
 \end{table}
 
-Table~\ref{tab:efficiency} shows the empirical FPS measurements. FLASH delivers massive performance gains by unblocking the Actor-Critic bottleneck while keeping the additional computational overhead practically near zero.
-
-\subsection{Train vs. Evaluation Performance Gap}
-
-\begin{figure}[h]
-\centering
-\todo{Insert a graph showing the phenomenon where the Train score is low but the Evaluation score is remarkably high.}
-\label{fig:train_eval_gap}
-\end{figure}
-
-During training, the episode score often remains relatively low due to the inherent randomness required for exploration. However, the evaluation score skyrockets. This disparity, illustrated in Figure~\ref{fig:train_eval_gap}, provides strong evidence that FLASH effectively filters and extracts the optimal policy from the noisy, sub-optimal trajectories collected during exploration.
+Table~\ref{tab:efficiency} shows the empirical FPS measurements. FLASH delivers performance gains by unblocking the Actor-Critic bottleneck while keeping the additional computational overhead practically near zero.
 
 \subsection{Robustness of Value Function and Mitigation of Spatial Entanglement}
 To empirically evaluate how well FLASH mitigates the ``spatial entanglement'' issue previously established (Section \ref{sec:representation}), we conducted a rigorous robustness test on the Frostbite environment's value function. Specifically, we collected 17,496 continuous frames across varying stages of igloo construction. For each sequence, we artificially fixed the background and iteratively replaced only the bounding box of the igloo with templates of all 17 possible stages (0 to 16 blocks). We then computed Spearman's $\rho$ and Kendall's $\tau$ correlation coefficients between the ground-truth stage index and the predicted value to measure how consistently the model recognizes the isolated igloo progression against constant background noise.
