@@ -13,9 +13,16 @@ dreamerv3/
 dubby/
 graduate_research/
 STORM/
+STORM-1/
 TWISTER/
 EDELINE/
 wandb_logs/
 .netrc
 .nv/
 images/
+miniconda3/
+.anaconda/
+.conda/
+.triton/
+.bashrc
+.bash_profile
