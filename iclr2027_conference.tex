@@ -1,0 +1,611 @@
+\documentclass{article} % For LaTeX2e
+\usepackage{iclr2027_conference,times}
+\usepackage{kotex} % Added for Korean output (remove later if necessary)
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\input{math_commands.tex}
+
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{color}
+
+% 빈칸(TODO)을 쉽게 찾을 수 있도록 강조하는 매크로
+\newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
+
+\title{FLASH: Fast Latent Anchor Search with Hashing}
+
+\author{\todo{Author 1 Name} \\
+\todo{Author 1 Affiliation} \\
+\texttt{\todo{Author 1 Email}} \\
+\And
+\todo{Author 2 Name} \\
+\todo{Author 2 Affiliation} \\
+\texttt{\todo{Author 2 Email}} \\
+% 필요한 만큼 \And 로 추가하세요
+}
+
+\newcommand{\fix}{\marginpar{FIX}}
+\newcommand{\new}{\marginpar{NEW}}
+
+%\iclrfinalcopy % Uncomment for camera-ready version, but NOT for submission.
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Recent advancements in Reinforcement Learning (RL) have heavily adopted Diffusion-based models to improve visual representations, but they suffer from prohibitive computational costs. In this paper, we investigate whether this heavy generative approach is the only solution. While prior work assumes that compact visual representations discard fine-grained details, we revisit this assumption. Through rigorous probing, we reveal that lightweight encoders do not fundamentally lose semantic information, but rather blur and entangle it spatially. If information were truly lost, upgrading the encoder would be the only viable remedy; however, because it is merely blurred, this entanglement can also be resolved through alternative downstream methods. Building on this, we demonstrate that augmenting the Actor-Critic optimization process is a highly effective way to disentangle these blurred states. To this end, we propose FLASH (Fast Latent Anchor Search with Hashing), an efficient retrieval module that enables the Actor-Critic to naturally align or disentangle aliased representations. By effectively unblurring the latent space, FLASH acts as a versatile plug-and-play module that universally elevates the performance of existing baselines without altering their underlying encoders, confirming that heavy generative models are not strictly necessary and acting as a powerful exploitation amplifier with negligible computational overhead.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:intro}
+
+Recently, the integration of Diffusion models into Reinforcement Learning (RL) has become increasingly popular, yielding strong performance in various benchmarks \citep{lee2026edeline, alonso2024diffusion}. However, this trend has brought about a significant drawback: massive computational costs and high latency during both training and inference. This raises a fundamental question: \textit{Is adopting these computationally expensive representation models the only path forward, or are we overlooking more efficient, alternative solutions?}
+
+In this work, we challenge the singular focus on enhancing representation quality through heavy generative models. Prior work has demonstrated that compact visual representations can inadequately preserve fine-grained visual details, leading to the assumption that this information is irreversibly discarded. Our experiments revisit this assumption. Through rigorous probing, we demonstrate that lightweight encoders do not fundamentally lose semantic information, but rather blur and entangle it. If information were irrevocably lost, replacing the encoder would indeed be the only viable solution. However, because it is merely blurred, this spatial entanglement can also be resolved through alternative downstream methods. Specifically, we show that augmenting the Actor-Critic optimization process provides a highly effective alternative to disentangle these blurred states, without requiring any changes to the encoder itself.
+
+Our contributions are threefold:
+First, we provide empirical evidence that poor visual reconstruction in lightweight encoders equates to spatial blurring rather than a permanent loss of underlying semantic information.
+Second, based on this distinction, we propose an alternative solution: instead of replacing the encoder, we can successfully disentangle these blurred states downstream by augmenting the Actor-Critic optimization process.
+Finally, we propose FLASH, an efficient retrieval mechanism that embodies this alternative approach. By effectively retrieving structurally aliased past experiences and grouping them within the same training batch, FLASH enables the Actor-Critic to naturally align or disentangle these blurred representations. In doing so, it seamlessly integrates into existing baselines as a plug-and-play module to elevate overall performance with minimal computational overhead.
+
+\section{Related Work}
+\label{sec:related}
+
+\textbf{Representation Learning in RL.} 
+Early visual world models sought to compress high-dimensional observations into compact latent states while retaining information relevant for control \citep{hafner2019learning}. Building on this, models like Dreamer \citep{hafner2019dream} and DreamerV2 \citep{hafner2020mastering} demonstrated that planning and Actor-Critic optimization could be performed entirely within these learned latent spaces. However, relying purely on reconstruction often fails to capture fine-grained details in complex environments. To mitigate this, a significant body of work has focused on improving the representation itself through auxiliary objectives. For instance, CURL \citep{laskin2020curl} introduced contrastive unsupervised learning, while SPR \citep{schwarzer2020data} enforced temporal predictive consistency to learn invariant representations. Approaches like ATC \citep{stooke2021decoupling} explicitly decoupled representation learning from policy optimization, demonstrating the value of structured latent spaces. More recently, DreamerPro \citep{deng2022dreamerpro} highlighted the limitations of visual reconstruction by adopting reconstruction-free, prototypical representations. Despite these advancements, the overarching paradigm has remained focused on modifying and improving the encoder itself. In this work, we take a fundamentally different perspective: we ask whether the spatial ambiguity left by a lightweight encoder can instead be effectively resolved downstream during the Actor-Critic optimization process, without requiring any modifications to the underlying encoder.
+
+\textbf{Generative and Diffusion World Models.}
+Prior work has demonstrated that compact visual representations can discard or inadequately preserve fine-grained visual details relevant to control. Recognizing that ``visual details matter,'' recent studies have increasingly turned to heavy generative models to preserve richer visual information. Most notably, DIAMOND \citep{alonso2024diffusion} replaces the discrete latent bottleneck with a diffusion-based world model, achieving high visual fidelity and robust performance by retaining complex environmental details. While these generative approaches successfully address the representation problem, they introduce substantial computational burdens and severe latency during both training and inference. FLASH offers an alternative: rather than relying on computationally prohibitive generative models to fix the encoder, we maintain the lightweight encoder and compensate for the resulting visual ambiguity through targeted downstream retrieval.
+
+\textbf{Episodic Control and Retrieval-Augmented RL.}
+Episodic control rapidly exploits successful historical experiences to accelerate learning. Early approaches, such as MFEC \citep{blundell2016model} and NEC \citep{pritzel2017neural}, utilized episodic memory for fast, non-parametric value estimation. Subsequent methods like EVA \citep{hansen2018fast} improved upon this by retrieving structurally similar past experiences to directly adjust and augment parametric value estimates. Further advancements have explored structuring these memories; for example, ERLAM \citep{zhu2020episodic} constructs explicit associative memory graphs for rapid trajectory propagation, while recent works have incorporated state abstraction \citep{li2023neural}. In these existing frameworks, the retrieved memory explicitly serves as a direct component of the value estimation or policy control. FLASH differs fundamentally in both methodology and overhead. Instead of performing heavy nearest-neighbor searches or constructing complex relational graphs to explicitly compute values, FLASH utilizes extremely lightweight hashing to identify structurally similar historical experiences. Crucially, FLASH injects these retrieved experiences directly into the Actor-Critic training batch. By simply reshaping the data distribution of the training batch, FLASH naturally enables an otherwise unchanged Actor-Critic learner to align or disentangle blurred representations, serving as a highly efficient plug-and-play augmentor rather than a standalone memory module.
+
+\section{Motivation: Re-evaluating Representation and Optimization Bottlenecks}
+\label{sec:representation}
+
+\subsection{The Myth of Reconstruction Quality}
+Recent model-based RL research often assumes that blurry decoded images imply a permanent loss of fine-grained information in the latent space. In this section, we investigate whether this is an irreversible loss or merely a rendering failure of the decoder.
+
+As qualitative evidence, we observe the \textit{temporal persistence of objects} during the \textbf{open-loop imagination phase} in models like DreamerV3 and Drama \citep{hafner2023mastering, wang2025drama}. During this phase, the model predicts future states solely based on its internal transition dynamics, without access to real observations. For instance, as shown in Figure~\ref{fig:temporal_persistence}, during an imagined trajectory, a clearly rendered object (e.g., a fish) may blur or disappear from the decoded frame for a timestep (e.g., $t+1$), only to reappear perfectly in its expected trajectory subsequently (e.g., $t+2$). Since the model has no external input to "rediscover" the fish at $t+2$, this phenomenon definitively proves that the ontological information of the object was never lost in the latent states; the transition model successfully propagated it through the sequence, and it was simply a rendering failure of the decoder. Therefore, relying on reconstruction quality is a deceptive metric for evaluating the true capacity of an encoder.
+
+\begin{figure}[h]
+\centering
+\begin{minipage}{0.32\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{reconstruction/frame_0061_marked.png}\\
+  (a) $t$ (Clear)
+\end{minipage}\hfill
+\begin{minipage}{0.32\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{reconstruction/frame_0062_marked.png}\\
+  (b) $t+1$ (Blurry)
+\end{minipage}\hfill
+\begin{minipage}{0.32\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{reconstruction/frame_0063_marked.png}\\
+  (c) $t+2$ (Clear)
+\end{minipage}
+\caption{Temporal persistence of objects during the open-loop imagination phase. At time $t$ and $t+2$, the fish is clearly rendered. However, at $t+1$, the fish temporarily blurs. Since this sequence is purely imagined without external observations, the perfect reappearance at $t+2$ proves that the fish's ontological information was preserved in the latent state throughout, and the blurriness was merely a decoder rendering failure. Yellow circles highlight the target fish.}
+\label{fig:temporal_persistence}
+\end{figure}
+
+\subsection{Probing the Latent Space: Information Loss vs. Blurring}
+\label{subsec:probing_latent}
+To formally investigate whether standard lightweight encoders successfully capture functionally critical elements, we conducted extensive probing experiments on the Seaquest environment. First, using images with perfectly identical backgrounds varying only the target elements, we observed that the pairwise cosine similarities of latent states encoding different diver counts and positions were strictly less than 1.0 (dropping to $0.86$ and $0.63$, respectively). This confirmed that the encoder does not simply ignore these small, static elements.
+
+To quantitatively verify this, we detached the pre-trained encoder and trained a lightweight MLP to predict ground-truth RAM states (e.g., diver counts and exact $(x, y)$ coordinates) directly from the latent state $z$. As detailed in Appendix \ref{sec:appendix_detailed_probing}, our probing achieved exceptional accuracy ($>99\%$ for diver counting and $92.4\%$ for spatial localization) on pristine clean observations. 
+
+However, when we injected extreme uniform noise into the background spaces---leaving only the target bounding box intact---the classification accuracy plummeted drastically (e.g., from $99.6\%$ to $68.1\%$ in Seaquest). This precipitous drop empirically validates the blurring hypothesis: standard encoders do suffer from spatial entanglement, where global background noise bleeds into and corrupts the local representations. 
+
+Crucially, the fact that the cosine similarities were strictly less than 1.0 proves that the essential semantic information is \textit{not} fundamentally lost or erased by the encoder; it is merely \textit{blurred} across the latent space. If information were truly lost, replacing the heavy encoder (e.g., via Diffusion models) would be the \textit{only} viable solution. But because it is merely blurred, we hypothesize that the immediate failure actually stems from the downstream components' inability to extract and utilize these entangled representations, presenting an opportunity for optimization-level interventions.
+
+\subsection{The Actor-Critic Optimization as an Intervention Point}
+\label{subsec:ac_intervention}
+Having established that the necessary information remains preserved (albeit entangled) in the latent space, we argue that replacing the lightweight encoder is not the only solution. Instead, if we retain the efficient encoder, the burden of disentangling these blurred states naturally falls upon the downstream Actor-Critic optimization process. However, we observe extreme performance variance across different random setups: even when some seeds discover high-reward trajectories during early exploration, the Actor-Critic often fails to fully capitalize on them, resulting in evaluation scores far below the potential suggested by its best episodes (see Appendix \ref{sec:appendix_ac_bottleneck}). Furthermore, traditional Actor-Critic architectures struggle to efficiently stabilize and learn from rare, high-variance value spikes that occur upon discovering delayed rewards. 
+
+Rather than viewing this solely as a representation failure, this observation highlights a critical opportunity: the Actor-Critic's current inability to disentangle blurred states and reliably exploit successful trajectories presents a highly effective intervention point. This insight directly motivates our proposed method, FLASH, which seeks to resolve the spatial entanglement precisely at the Actor-Critic optimization level without incurring the massive overhead of generative models.
+
+\section{Proposed Method: FLASH (Fast Latent Anchor Search with Hashing)}
+\label{sec:method}
+
+To efficiently disentangle these blurred states and augment the Actor-Critic optimization process, we introduce FLASH.
+
+\subsection{Episodic Memory and Retrieval with FLASH}
+\label{subsec:flash_method}
+
+Instead of relying solely on parametric gradient updates, FLASH maintains a lightweight episodic memory indexed by Locality-Sensitive Hashing (LSH) and retrieves structurally similar past contexts to directly augment the Actor-Critic training batch. The pipeline consists of four stages: \textbf{(1) Hashing \& Indexing}, \textbf{(2) Surprise-based Anchor Triggering}, \textbf{(3) Lazy Retrieval with Re-verification}, and \textbf{(4) In-batch Injection with Inverse-Group Weighting}. We describe each stage below and summarize the complete procedure in Algorithm~\ref{alg:flash}. We additionally illustrate the overall architecture in Figure~\ref{fig:flash_pipeline}.
+
+\paragraph{Stage 1: Hashing \& Indexing.}
+At every environment step, the world model encoder $f_\theta$ maps the current observation $o_t$ to a categorical latent representation $z_t = f_\theta(o_t) \in \mathbb{R}^{d}$, where $d = K \times C$ with $K$ categorical variables each of $C$ classes. We apply an LSH function $h: \mathbb{R}^d \to \{0,1,\ldots,2^B{-}1\}$ to produce a discrete hash key:
+\begin{equation}
+h(z_t) = \sum_{i=1}^{B} \mathbf{1}\!\left[\left(W_{\text{proj}}^\top (z_t - \mu)\right)_i > 0\right] \cdot 2^{i-1},
+\label{eq:lsh}
+\end{equation}
+where $B$ is the number of hash bits, $\mu$ is the centering vector (initially $\mathbf{0}$), and $W_{\text{proj}} \in \mathbb{R}^{d \times B}$ is the projection matrix (initially a random Gaussian projection). During \textit{Global Rebuild} (described below), both are updated via PCA on the current buffer's latent distribution to align the hash hyperplanes with the principal axes of variation.
+
+Each transition pointer $(p_t, e)$---where $p_t$ is the circular buffer index and $e$ is the environment index---is inserted into a hash bucket $\mathcal{B}_{h(z_t)}$. If a pointer's hash key changes (due to Global Rebuild), it is transparently migrated.
+
+\paragraph{Stage 2: Surprise-based Anchor Triggering.}
+During each world model training step, FLASH monitors the temporal-difference (TD) error and value difference to detect ``surprise'' events---moments where the agent's value estimate changes abruptly, indicating a potentially pivotal experience. Given a batch of sampled trajectories with value estimates $V(s_t)$ from the critic, we compute:
+\begin{align}
+\delta_t^{\text{TD}} &= \left| r_t + \gamma \, V(s_{t+1})(1 - d_t) - V(s_t) \right|, \label{eq:td_error} \\
+\Delta V_t &= V(s_t) - V(s_{t-1}), \label{eq:value_diff}
+\end{align}
+where $r_t$ is the reward, $\gamma$ is the discount factor, and $d_t$ is the termination flag. To normalize across environments with varying reward scales, we maintain per-environment exponential moving averages (EMA) of the mean and variance:
+\begin{align}
+\bar{\mu}_e &\leftarrow (1-\alpha)\bar{\mu}_e + \alpha \cdot \mathbb{E}[\delta^{\text{TD}}_{e}], \quad
+\bar{\sigma}^2_e \leftarrow (1-\alpha)\bar{\sigma}^2_e + \alpha \cdot \text{Var}[\delta^{\text{TD}}_{e}], \label{eq:ema_update}
+\end{align}
+and analogously for $\Delta V$. The combined surprise metric is:
+\begin{equation}
+S_t = \text{ReLU}\!\left(\frac{\delta^{\text{TD}}_t - \bar{\mu}_e}{\sqrt{\bar{\sigma}^2_e} + \epsilon}\right) \cdot \text{softplus}\!\left(\frac{\Delta V_t - \bar{\mu}^{V}_e}{\sqrt{\bar{\sigma}^{2,V}_e} + \epsilon}\right).
+\label{eq:surprise}
+\end{equation}
+By pairing a strict ReLU with a softplus, this formulation guarantees that it will never fire unless the TD-error is above average, regardless of how much the value spikes. Conversely, an extremely large TD-error can still trigger the anchor even if the value decreases slightly. This captures precisely the pivotal moments where a highly surprising or high-reward sub-trajectory is first discovered. For each trajectory sequence in the batch, when the maximum surprise score across its time steps exceeds the threshold ($\max_{t \in \text{seq}} S_t > \tau_z$), the corresponding buffer pointer (offset backwards by $\Delta_{\text{anchor}}$ steps to capture the critical preceding actions that caused the surprise; see Appendix~\ref{sec:appendix_causal_anchor} for architectural details) is registered as an \textit{active anchor} $a = (p_{t^*+\Delta_\text{anchor}},\, e)$ where $t^* = \text{argmax}_{t \in \text{seq}} S_t$, in a FIFO queue $\mathcal{A}$.
+
+\paragraph{Stage 3: Lazy Retrieval with Re-verification.}
+At each imagination step (where the agent generates imagined trajectories for policy training), FLASH pops up to $M$ anchors from $\mathcal{A}$. For each anchor $a$ with stored hash key $k_a$, we sample up to $m \times (n{-}1)$ candidate pointers from bucket $\mathcal{B}_{k_a}$ (excluding the anchor itself). To combat \textit{representation drift}---the gradual shift in hash keys as $f_\theta$ evolves---we perform \textbf{lazy re-verification}: each candidate's single-frame observation is re-encoded through the \textit{current} world model, and only candidates whose re-computed hash key matches $k_a$ are retained. This yields a set of verified neighbors $\mathcal{N}_a$ with $|\mathcal{N}_a| \leq n$, including the anchor itself.
+
+If the average hit rate (fraction of candidates passing re-verification) drops below a threshold $\eta$, a \textbf{Global Rebuild} is triggered: all hash buckets are cleared, the PCA projection $W_{\text{proj}}$ and mean $\mu$ are recomputed from a fresh encoding of the entire replay buffer, and all transitions are re-hashed. This ensures the hash structure stays aligned with the evolving representation, subject to a cooldown period to amortize cost.
+
+
+\paragraph{Stage 4: In-batch Injection with Inverse-Group Weighting.}
+For each retrieved group $\mathcal{N}_a$, we extract the preceding $L$-step context window of observations and actions from the replay buffer (validating that no episode termination occurs within the window). Let $N_{\text{ret}} = \sum_{a} |\mathcal{N}_a|$ denote the total number of retrieved contexts (including both anchors and their matched neighbors). These are concatenated with randomly-sampled contexts to form the imagination batch:
+\begin{equation}
+\mathcal{D}_{\text{imagine}} = \underbrace{\{(o_{t-L:t},\, a_{t-L:t})\}_{i=1}^{N_\text{rand}}}_{\text{random samples}} \;\cup\; \underbrace{\bigcup_{a \in \text{popped}} \{(o^{(j)}_{t-L:t},\, a^{(j)}_{t-L:t})\}_{j \in \mathcal{N}_a}}_{\text{retrieved contexts (anchors + neighbors)}},
+\label{eq:batch_compose}
+\end{equation}
+where $N_{\text{rand}} = \max\big(0,\, N_{\text{total}} - N_{\text{ret}}\big)$, and $N_{\text{total}}$ is the base imagination batch size. Because we substitute $N_{\text{ret}}$ random samples with $N_{\text{ret}}$ retrieved contexts, the physical batch size is strictly maintained at $N_{\text{total}}$.
+
+To prevent any single anchor group from dominating the gradient---especially in the case of Constructive Alignment---each member within group $\mathcal{N}_a$ receives an \textbf{inverse-group weight} $w_j = 1/|\mathcal{N}_a|$, while every random sample receives $w=1$. Consequently, the total effective weight sum across the augmented batch becomes:
+\begin{equation}
+W_{\text{sum}} = N_{\text{rand}} + M_{\text{valid}} < N_{\text{total}},
+\label{eq:weight_sum}
+\end{equation}
+where $M_{\text{valid}}$ is the number of valid anchor groups. Because $N_{\text{ret}} > M_{\text{valid}}$ (due to the inclusion of neighbor contexts), $W_{\text{sum}}$ is intentionally reduced below the original base batch size $N_{\text{total}}$.
+
+All Actor-Critic losses---policy, value, and entropy---are normalized by this reduced sum $W_{\text{sum}}$:
+\begin{equation}
+\mathcal{L}_{\text{AC}} = \frac{1}{W_{\text{sum}}} \sum_{i \in \mathcal{D}_{\text{imagine}}} w_i \left[\mathcal{L}_{\text{actor}}(s_i, a_i) + \mathcal{L}_{\text{critic}}(s_i) - \beta \, \mathcal{H}(\pi(\cdot | s_i))\right].
+\label{eq:weighted_loss}
+\end{equation}
+
+\textbf{Balancing Learning Speed Ratio:} This deliberate reduction in effective weight is critical. Since FLASH retrieves highly pivotal and structurally aligned states, it provides highly accurate directional gradient signals that significantly accelerate the Actor-Critic optimization. If we were to preserve the total weight (e.g., by setting $N_{\text{rand}} = N_{\text{total}} - M_{\text{valid}}$), the Actor-Critic would learn too rapidly and outpace the World Model, degrading overall performance. Reducing the total effective weight acts as a necessary synchronizer, ensuring the Actor-Critic pace matches the World Model. (We provide detailed ablations validating this weight reduction, including comparisons with a globally reduced random batch, in Appendix~\ref{sec:appendix_ablation_weight}).
+
+\paragraph{Warmup Curriculum.}
+During an initial warmup phase (the first $T_{\text{warm}} = 50,000$ environment steps), the EMA statistics accumulate but no anchors are triggered and no retrieval occurs. This prevents noisy early-stage value estimates from corrupting the anchor selection process. Retrieval is activated only after the world model and value function have stabilized sufficiently. \todo{Update $T_{\text{warm}}$ value after hyperparameter tuning is complete.}
+
+\begin{algorithm}[t]
+\caption{FLASH: Fast Latent Anchor Search with Hashing}
+\label{alg:flash}
+\begin{algorithmic}[1]
+\REQUIRE Replay buffer $\mathcal{R}$, world model encoder $f_\theta$, critic $V_\psi$, hash function $h(\cdot)$
+\REQUIRE Hyperparameters: hash bits $B$, z-score threshold $\tau_z$, warmup steps $T_{\text{warm}}$, context length $L$, max anchors $M$, multiplier $m$, target $n$, rebuild threshold $\eta$, cooldown $C$
+\STATE Initialize hash buckets $\{\mathcal{B}_k\}$, anchor queue $\mathcal{A} \leftarrow \emptyset$, EMA statistics
+\FOR{each environment step $t$}
+    \STATE Encode $z_t \leftarrow f_\theta(o_t)$, compute $k_t \leftarrow h(z_t)$
+    \STATE Insert pointer $(p_t, e)$ into $\mathcal{B}_{k_t}$
+\ENDFOR
+\FOR{each world model training step (after warmup)}
+    \STATE Compute batch TD-errors $\delta^{\text{TD}}_t$ and value-differences $\Delta V_t$
+    \STATE Update EMA statistics via Eq.~\eqref{eq:ema_update}
+    \STATE Compute surprise $S_t$ via Eq.~\eqref{eq:surprise}
+    \IF{$\max_t S_t > \tau_z$}
+        \STATE Push anchor $(p_{t^*+\Delta_\text{anchor}}, e)$ into $\mathcal{A}$
+    \ENDIF
+\ENDFOR
+\FOR{each imagination step (policy training)}
+    \STATE Pop up to $M$ anchors from $\mathcal{A}$
+    \FOR{each anchor $a$ with key $k_a$}
+        \STATE Sample candidates from $\mathcal{B}_{k_a}$, re-encode, keep matches $\to \mathcal{N}_a$
+    \ENDFOR
+    \STATE Compose augmented batch $\mathcal{D}_{\text{imagine}}$ via Eq.~\eqref{eq:batch_compose}
+    \STATE Train Actor-Critic with weighted loss (Eq.~\eqref{eq:weighted_loss})
+    \IF{avg hit rate $< \eta$ and cooldown elapsed}
+        \STATE \textbf{Global Rebuild}: PCA $\to$ update $(W_{\text{proj}}, \mu)$, re-hash all $\mathcal{R}$
+    \ENDIF
+\ENDFOR
+\end{algorithmic}
+\end{algorithm}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{pipeline.png}
+\caption{Overview of the FLASH pipeline. \textbf{(Left)} During environment interaction, each observation is processed by the encoder and projector to generate a discrete binary hash, which is registered in a hash bucket. \textbf{(Right)} Triggered anchors and target states retrieve structurally similar frames with matching hashes from the hash bucket. These grouped experiences serve as the basis for imagination, naturally clustering structurally aliased past experiences together.}
+\label{fig:flash_pipeline}
+\end{figure}
+
+\subsection{Theoretical Intuition: Forcing Disentanglement via In-Batch Retrieval}
+A core strength of FLASH is how it empowers the Actor-Critic to ``unblur'' entangled representations without introducing artificial contrastive biases. When a lightweight encoder blurs small details, semantically distinct states (e.g., having 3 vs. 4 divers) map to highly similar, aliased latent vectors. Standard Actor-Critic networks fail to utilize this blurred information because they take the path of least resistance: they rely on dominant background features and ignore subtle, entangled signals. When these aliased states are encountered in separate batches, the network receives oscillating, conflicting gradients that cancel each other out.
+
+FLASH overcomes this optimization bottleneck by retrieving these aliased historical states and injecting them into the \textit{exact same training batch}. This creates a powerful bifurcated gradient effect:
+\begin{itemize}
+    \item \textbf{Constructive Alignment:} If the states are genuinely similar in both structure and value, processing them simultaneously smoothly aligns their value estimates, reinforcing a stable learning signal.
+    \item \textbf{Destructive Separation (Anti-Aliasing):} If the states are structurally aliased but hold different semantic values (e.g., one state recently achieved a sparse reward), standard encoders often take the path of least resistance by collapsing their representations and predicting an ``averaged'' value to minimize expected loss. By placing them in the exact same batch, FLASH creates a massive contrastive gradient. The network can no longer settle for this blurred average; to minimize the joint loss, it is mathematically forced to analyze the subtle differences between the states and actively disentangle the latent dimensions to differentiate their values in a single forward-backward pass.
+\end{itemize}
+
+This mechanism effectively explains the discrepancy in our empirical results across different environments. In games like \textit{Frostbite}, occasional successes (e.g., building an igloo) provide strong, distinct value spikes. FLASH pairs these high-value states with aliased low-value states in the same batch, providing the necessary gradient catalyst for the Actor-Critic to successfully ``unblur'' the representation. Conversely, in extreme sparse reward games like \textit{Seaquest}, the agent may never randomly discover the terminal reward (e.g., collecting 6 divers and surfacing). Without this critical value spike, there is no strong gradient catalyst to force Destructive Separation. Even if FLASH groups 3-diver and 4-diver states together, their target values remain uniformly near zero, yielding no pressure to disentangle the blur. This highlights that FLASH is not a substitute for initial exploration, but an exceptionally efficient ``Exploitation Amplifier'' that extracts maximum utility from blurred representations once a reward signal is discovered.
+
+\section{Experiments}
+\label{sec:experiments}
+
+\subsection{Experimental Setup}
+We evaluate our method across all 26 games of the Atari 100k benchmark.
+
+\subsection{Main Performance}
+Table~\ref{tab:main_performance} presents the comprehensive Atari 100k results. 
+
+
+\begin{table}[h]
+\centering
+\label{tab:main_performance}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{lrrrrrrrr}
+\toprule
+Game & Random & Human & STORM & STORM+ours & DRAMA & DRAMA+ours & EDELINE & EDELINE+ours \\
+\midrule
+Alien         & 227.8 & 7127.7 & 891 & \textcolor{blue}{\textbf{1039.2}} & - & - & - & - \\
+Amidar        & 5.8 & 1719.5 & 204.8 & \textcolor{red}{\textbf{147.8}} & - & - & - & - \\
+Assault       & 222.4 & 742.0 & 662.7 & \textcolor{blue}{723} & - & - & - & - \\
+Asterix       & 210.0 & 8503.3 & - & - & - & - & - & - \\
+BankHeist     & 14.2 & 753.1 & 163 & \textcolor{blue}{169.5} & - & - & - & - \\
+BattleZone    & 2360.0 & 37187.5 & 10283.3 & \textcolor{blue}{10933.3} & - & - & - & - \\
+Boxing        & 0.1 & 12.1 & - & - & - & - & - & - \\
+Breakout      & 1.7 & 30.5 & - & - & - & - & - & - \\
+ChopperCommand & 811.0 & 7387.8 & - & - & - & - & - & - \\
+CrazyClimber  & 10780.5 & 35829.4 & - & - & - & - & - & - \\
+DemonAttack   & 152.1 & 1971.0 & - & - & - & - & - & - \\
+Freeway       & 0.0 & 29.6 & - & - & - & - & - & - \\
+Frostbite     & 65.2 & 4334.7 & 2080.8 & \textcolor{blue}{\textbf{2524.2}} & - & - & - & - \\
+Gopher        & 257.6 & 2412.5 & - & - & - & - & - & - \\
+Hero          & 1027.0 & 30826.4 & - & - & - & - & - & - \\
+Jamesbond     & 29.0 & 302.8 & - & - & - & - & - & - \\
+Kangaroo      & 52.0 & 3035.0 & 1470 & \textcolor{blue}{1590} & - & - & - & - \\
+Krull         & 1598.0 & 2665.5 & 5311 & \textcolor{blue}{5584.5} & - & - & - & - \\
+KungFuMaster  & 258.5 & 22736.3 & 23815 & \textcolor{red}{20245} & - & - & - & - \\
+MsPacman      & 307.3 & 6951.6 & - & - & - & - & - & - \\
+Pong          & -20.7 & 14.6 & 5.7 & \textcolor{blue}{\textbf{9.8}} & - & - & - & - \\
+PrivateEye    & 24.9 & 69571.3 & - & - & - & - & - & - \\
+Qbert         & 163.9 & 13455.0 & 2778.8 & \textcolor{blue}{\textbf{3379.4}} & - & - & - & - \\
+RoadRunner    & 11.5 & 7845.0 & - & - & - & - & - & - \\
+Seaquest      & 68.4 & 42054.7 & - & - & - & - & - & - \\
+UpNDown       & 533.4 & 11693.2 & - & - & - & - & - & - \\
+\midrule
+\#Superhuman ($\uparrow$) & 0 & N/A & 2  & \textcolor{red}{\textbf{1}} & -  & -  & -  & -  \\
+Mean ($\uparrow$) & 0.000 & 1.000 & 0.719  & \textcolor{blue}{0.767} & -  & -  & -  & -  \\
+Median ($\uparrow$) & 0.000 & 1.000 & 0.472  & \textcolor{blue}{0.516} & -  & -  & -  & -  \\
+IQM ($\uparrow$) & 0.000 & 1.000 & 0.453  & \textcolor{blue}{0.506} & -  & -  & -  & -  \\
+Optimality Gap ($\downarrow$) & 1.000 & 0.000 & 0.511  & \textcolor{blue}{0.481} & -  & -  & -  & -  \\
+\bottomrule
+\end{tabular}
+}
+\end{table}
+
+Our initial evaluation reveals that FLASH yields substantial improvements in several environments (e.g., Frostbite, Asterix, Qbert), while showing marginal changes or noise-level variance in others (e.g., Hero, MsPacman, Seaquest). 
+
+\todo{After securing experimental data for all 26 Atari games, write an in-depth analysis (Discussion) here on which environmental characteristics (e.g., reward frequency, exploration difficulty, state space complexity) determine FLASH's performance improvement. You must derive objective commonalities for why performance significantly increases only in specific groups.}
+
+Overall, the preliminary results indicate that our approach significantly stabilizes the RL optimization process in specific environments, paving the way for a deeper investigation into the structural dependencies of Actor-Critic bottlenecks.
+
+\subsection{Amplification of Successful Exploration}
+
+\begin{figure}[h]
+\centering
+
+% (a) Learning Dynamics (1x2 Learning Curves for Successful Seed)
+\begin{minipage}{\textwidth}
+  \centering
+  \includegraphics[width=0.48\linewidth]{experiment/fig_episode_success.pdf} \hfill
+  \includegraphics[width=0.48\linewidth]{experiment/fig_eval_success.pdf} \\ \vspace{0.2cm}
+  \textbf{(a) Learning Dynamics of a Representative Successful Seed}
+\end{minipage}
+
+\vspace{0.6cm}
+
+% (b) Final Score Distribution (Box + Swarm Plot)
+\begin{minipage}{\textwidth}
+  \centering
+  \includegraphics[width=0.7\linewidth]{experiment/fig_distribution.pdf} \\ \vspace{0.2cm}
+  \textbf{(b) Distribution of Final Evaluation Scores (20 Seeds)}
+\end{minipage}
+
+\caption{Amplification of Successful Exploration. \textbf{(a)} Learning curves for a representative successful seed. While the Episode Scores (left) remain similar, FLASH acts as an "Exploitation Amplifier," significantly boosting the Evaluation Score (right) of the successful seed. For seeds that fail to explore, the learning dynamics of FLASH and Baseline remain virtually identical and are omitted for brevity. (Note: The divergence between the curves before the warmup period ends at step 40k is an expected artifact of random number generator consumption for EMA tracking, as detailed in Appendix \ref{sec:appendix_rng_divergence}.) \textbf{(b)} The distribution of final evaluation scores across 20 seeds. The plot reveals that while the lower-bound performance remains identical (failed seeds), the upper-tail of the distribution is dramatically extended by FLASH.}
+\label{fig:exploitation_amplifier}
+\end{figure}
+
+A key property of FLASH is its ability to act as an "Exploitation Amplifier." As shown in Figure~\ref{fig:exploitation_amplifier}, if a seed manages to achieve a high episode score (e.g., $>800$) even once during early exploration, our method aggressively exploits this trajectory, pulling the overall evaluation score up to converge near the maximum achieved episode score. Conversely, for seeds that completely fail to explore (e.g., $<300$ points), there are no high-quality past experiences to retrieve, resulting in no artificial performance gain. This demonstrates that FLASH does not magically solve hardcore exploration, but ensures that rare, successful exploratory signals are never lost and are optimally absorbed by the policy.
+
+\subsection{Computational Efficiency: Negligible Overhead}
+Because FLASH focuses solely on optimizing the Actor-Critic training rather than modifying the heavy representation models, it adds practically zero computational burden to the base model. 
+
+Since the latent dimension ($d$), hash bits ($B$), and other hyperparameters (e.g., context lengths, batch sizes) are strictly bounded constants, the algorithmic time complexity simplifies as follows:
+\begin{itemize}
+    \item \textbf{Insertion per frame:} $\mathcal{O}(d \cdot B) \approx \mathcal{O}(1)$. The state encoding cost is completely absorbed by the world model's inherent forward pass.
+    \item \textbf{Global Rebuild:} $\mathcal{O}(N_{\text{buf}} d^2 + d^3 + N_{\text{buf}} d B) \approx \mathcal{O}(N_{\text{buf}})$. Scales linearly with buffer size $N_{\text{buf}}$. Triggered rarely via the lazy rebuild threshold, making its amortized cost negligibly small.
+    \item \textbf{Retrieval step:} $\mathcal{O}\big(M m n (|f_\theta| + d \cdot B) + M n L\big) \approx \mathcal{O}(1)$. Re-verification and extraction overhead is minimal and strictly bounded.
+    \item \textbf{Anchor Triggering:} $\mathcal{O}(N_{\text{batch}} \cdot L_{\text{seq}}) \approx \mathcal{O}(1)$. Lightweight Z-score tracking requires no additional neural network passes.
+\end{itemize}
+
+\begin{table}[h]
+\centering
+\caption{\todo{Directly create a table here comparing the Frames Per Second (FPS) or total Training Time between the baseline model and our proposed method (+ours).}}
+\label{tab:efficiency}
+\end{table}
+
+Table~\ref{tab:efficiency} shows the empirical FPS measurements. FLASH delivers performance gains by unblocking the Actor-Critic bottleneck while keeping the additional computational overhead practically near zero.
+
+\subsection{Robustness of Value Function and Mitigation of Spatial Entanglement}
+\label{subsec:robustness_value}
+To empirically evaluate how well FLASH mitigates the ``spatial entanglement'' issue previously established (Section \ref{sec:representation}), we conducted a rigorous robustness test on the Frostbite environment's value function. Specifically, we collected 17,496 continuous frames across varying stages of igloo construction. For each sequence, we artificially fixed the background and iteratively replaced only the bounding box of the igloo with templates of all 17 possible stages (0 to 16 blocks). We then computed Spearman's $\rho$ and Kendall's $\tau$ correlation coefficients between the ground-truth stage index and the predicted value to measure how consistently the model recognizes the isolated igloo progression against constant background noise.
+
+Our primary metric of interest is the per-sequence correlation, which directly quantifies the model's resistance to spatial entanglement. On an individual, per-sequence basis, the Baseline model suffers from near-random correlation ($\rho=0.0668$), proving that it is heavily entangled with the background and cannot reliably isolate the igloo's value in a frozen context. In striking contrast, FLASH more than doubles this per-sequence robustness ($\rho=0.1447$). This significant improvement validates that the retrieval of structurally similar historical anchors acts as an anti-aliasing mechanism, effectively forcing the Actor-Critic to disentangle the local target features from the global noise.
+
+Crucially, this improvement is achieved without modifying the underlying world model encoder. As detailed in Appendix \ref{sec:appendix_noise_robustness_flash}, probing the FLASH encoder directly reveals that its raw latent representations remain just as vulnerable to spatial entanglement as the Baseline. FLASH does not magically fix the encoder's blurring; rather, it provides the necessary contextual gradient catalyst for the Actor-Critic to successfully interpret and disentangle those blurred representations.
+
+Furthermore, we examined the \textit{Global Average Profile} (averaging the value predictions over all 17,496 sequences). The Baseline exhibits an almost perfect linear correlation ($\rho=0.9632$), blindly assuming that more igloo blocks always yield a monotonically higher value. However, FLASH's average profile ($\rho=0.6373$) peaks around Stage 11 and subsequently declines as the igloo nears completion (Stage 16). While seemingly counterintuitive, this decline is a highly sophisticated response to Partial Observability. Because the observations are aggressively downsampled to $64 \times 64$ pixels, the in-game temperature gauge (which serves as the strict time limit) becomes visually illegible, rendering the environment a Partially Observable Markov Decision Process (POMDP). Without direct access to the remaining time, the agent must infer this hidden state from other visual cues. In successful Frostbite trajectories, late-stage igloos (Stages 12--16) overwhelmingly correlate with the temperature nearing zero, placing the agent at imminent risk of death. By retrieving actual episodic memories, FLASH correctly infers this severe survival risk and discounts the value of late-stage igloos, demonstrating a far more nuanced and context-aware value landscape than the Baseline's naive pixel-counting overfit. Moreover, FLASH provides a significantly more distinct value differentiation during the early-to-mid construction phases; as detailed in Appendix \ref{sec:appendix_value_robustness}, the value gap from Stage 0 to the peak at Stage 11 is over twice as large in FLASH ($\sim60.7$) compared to the Baseline ($\sim28.5$). This steeper value gradient demonstrates that FLASH successfully aligns values and disentangles aliased states, providing a much stronger exploitation signal. Notably, the fact that FLASH achieves a higher per-sequence rank correlation (Metric 1) than the Baseline---despite the inherent statistical penalty caused by its non-monotonic decline after Stage 11---further underscores this point. It implies that FLASH's capacity to effectively differentiate and structure the values up to Stage 11 is significantly superior, easily compensating for the rank mismatch in the final stages.
+
+\section{Conclusion}
+\label{sec:conclusion}
+In this paper, we critique the recent trend of obsessing over visual representation quality in RL. We demonstrate that lightweight encoders do not lose critical information but merely blur it, implying that adopting heavy generative encoders is not the only path forward. Instead, we showed that this spatial entanglement can also be effectively resolved downstream by augmenting the Actor-Critic optimization process. To validate this alternative approach, we proposed FLASH, an efficient and low-overhead retrieval method designed as a plug-and-play module. By grouping structurally aliased past experiences to naturally align or disentangle their representations, FLASH successfully unblurs the latent space and universally elevates the performance of existing RL baselines while maintaining extreme computational efficiency.
+
+\bibliography{iclr2027_conference}
+\bibliographystyle{iclr2027_conference}
+
+\appendix
+
+\section{Implementation Details: Early Trajectory Divergence during Warmup}
+\label{sec:appendix_rng_divergence}
+As observed in our learning curves (e.g., Figure \ref{fig:exploitation_amplifier}), the performance of the Baseline and FLASH diverge even during the initial warmup phase ($t < 50,000$), despite FLASH not actively retrieving memories during this period. This divergence is an expected artifact of the implementation. During the warmup phase, FLASH actively calculates the temporal-difference (TD) errors and value differences to accumulate the Exponential Moving Average (EMA) statistics (as detailed in Section \ref{subsec:flash_method}). Evaluating these metrics involves network forward passes and sampling operations that consume the global Random Number Generator (RNG) state. Consequently, the sequence of random numbers used for subsequent action sampling shifts, leading to naturally diverging environment trajectories compared to the Baseline, which does not compute these statistics. We emphasize that this early divergence is purely due to RNG state consumption and not any premature retrieval intervention by FLASH.
+
+\section{Implementation Details: Causal Offset in Anchor Registration}
+\label{sec:appendix_causal_anchor}
+In our implementation based on STORM, the world model relies on a prior that predicts the current state based on observations up to the previous time step ($t-1$). Consequently, an abrupt spike in the value estimate or a large TD-error at step $t$ is heavily influenced by the transition dynamics resulting from the action taken at step $t-2$. To ensure that the retrieved context accurately encapsulates this causal action rather than just the resultant state, we specifically set the anchor offset to $\Delta_{\text{anchor}} = -2$. This shifts the retrieval anchor back to the precise moment the agent committed to the pivotal decision.
+\todo{storm 말고 다른 모델(drama 등)에서의 offset도 언급하기}
+
+\section{Irreducible Probing Error due to RAM-Render Misalignment}
+\label{sec:appendix_ram_misalignment}
+While our probing MLP achieves a pixel distance error of $12.44$ pixels on the original $160 \times 210$ Atari screen space, it is important to contextualize this value. The world model's encoder processes observations that have been downsampled to $64 \times 64$ pixels. In this resized $64 \times 64$ space, a $12.44$ pixel distance on the original screen corresponds to a deviation of less than $5$ pixels ($\approx 4.98$ pixels, based on the $64/160$ width scaling factor). 
+
+Furthermore, this remaining error is largely an irreducible artifact of the Atari 2600 emulation itself. There is a known spatial misalignment between the underlying RAM state coordinates and the exact pixel location where the sprites are rendered on the screen. For example, the RAM representation of a diver's position often exhibits minor positional offsets compared to its actual rendered visual center. 
+
+Additionally, this hardware-level asynchrony provides a strong justification for the $92.4\%$ presence prediction accuracy. The Atari RAM strictly registers a diver as "present" the exact moment its coordinate enters the screen boundary, even though visually only an almost imperceptible fraction of the sprite is drawn at the extreme left or right edges. Conversely, when the submarine collects a diver, the diver's entity is immediately wiped from the RAM state; yet, its visual sprite typically persists on the screen for at least one additional frame, heavily overlapping with the submarine before fully disappearing. These edge-case boundary entering and collision events create a persistent temporal mismatch between what is rendered and what the RAM dictates, accounting for the remaining gap in presence accuracy.
+
+\begin{figure}[h]
+    \centering
+    \begin{minipage}{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{ram_misalignment/frame_0040.png}
+        \caption{Boundary emergence event.}
+        \label{fig:ram_misalignment_boundary}
+    \end{minipage}\hfill
+    \begin{minipage}{0.48\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{ram_misalignment/frame_0120.png}
+        \caption{Spatial offset in RAM coordinate.}
+        \label{fig:ram_misalignment_offset}
+    \end{minipage}
+    \caption{Visualizing the RAM-render misalignment. (Left) A diver is registered in the RAM state as soon as it touches the screen boundary, even though only a negligible fraction of its sprite is visible at the edge (\texttt{frame\_0040.png}). (Right) The center of the RAM coordinate (red circle) does not perfectly align with the visual center of the diver sprite, demonstrating the intrinsic spatial misalignment (\texttt{frame\_0120.png}).}
+    \label{fig:ram_misalignment}
+\end{figure}
+
+\section{Ablation on Batch Weight Reduction and Learning Speed Synchronization}
+\label{sec:appendix_ablation_weight}
+As detailed in Section~\ref{subsec:flash_method}, our method computes the number of random samples as $N_{\text{rand}} = \max(0, N_{\text{total}} - N_{\text{ret}})$. When combined with inverse-group weighting, this effectively reduces the total weight of the batch $W_{\text{sum}}$ to a value strictly smaller than the base batch size $N_{\text{total}}$.
+
+To validate this design, we evaluated a variant where we only subtracted the number of valid anchors instead of the total retrieved contexts: $N_{\text{rand}} = \max(0, N_{\text{total}} - M_{\text{valid}})$. This alternative perfectly preserves the original total batch weight of $N_{\text{total}}$. However, we observed a significant performance degradation (\todo{자세한 성능 하락 언급}). We hypothesize that because FLASH provides highly focused, directional signals, it substantially accelerates the Actor-Critic optimization. Maintaining the full batch weight causes the Actor-Critic to learn too rapidly, disrupting the synchronization with the World Model's representation learning.
+
+Furthermore, one might ask: \textit{"Does the performance improve simply because the overall batch size is reduced?"} To test this, we ran a standard baseline where $N_{\text{total}}$ was artificially reduced (e.g., from 1024 to 1000) without any retrieval mechanism. This naive reduction did not yield the performance improvements seen with FLASH, confirming that the success of FLASH stems from the high-quality retrieved contexts and the balanced learning speed, rather than merely a smaller batch size.
+
+
+
+\section{Probing Accuracy of the FLASH Encoder}
+\label{sec:appendix_noise_robustness_flash}
+To confirm that FLASH operates exclusively by resolving the Actor-Critic optimization bottleneck without altering the foundational representation capacity, we repeated the spatial noise robustness evaluation (from Section \ref{sec:representation}) on the FLASH encoder.
+
+As shown in Table \ref{tab:per_class_noise_flash}, the FLASH encoder exhibits nearly identical behavior to the Baseline encoder. Under clean conditions, it perfectly preserves the 17 igloo construction stages (99.1\% accuracy). However, upon injecting background noise, the probing accuracy catastrophically drops to 27.2\%, suffering from the exact same spatial entanglement as the Baseline (which dropped to 27.7\%). This confirms that the significant robustness improvements observed in the value function (Section~\ref{subsec:robustness_value}) are purely the result of FLASH's retrieval-augmented Actor-Critic optimization, successfully extracting signal from persistently blurred representations.
+
+\begin{table}[h]
+    \centering
+    \caption{Per-class classification accuracy for igloo construction stages (0--16) in Frostbite using the FLASH encoder. The results mirror the Baseline, confirming the encoder itself remains vulnerable to spatial entanglement.}
+    \label{tab:per_class_noise_flash}
+    \begin{tabular}{crrr}
+        \toprule
+        \textbf{Igloo Stage} & \textbf{Samples ($n$)} & \textbf{Clean Accuracy (\%)} & \textbf{Noisy Accuracy (\%)} \\
+        \midrule
+        0 & $153$ & $100.0$ & $0.0$ \\
+        1 & $26$ & $88.5$ & $0.0$ \\
+        2 & $25$ & $88.0$ & $0.0$ \\
+        3 & $28$ & $96.4$ & $0.0$ \\
+        4 & $77$ & $98.7$ & $0.0$ \\
+        5 & $54$ & $98.1$ & $0.0$ \\
+        6 & $159$ & $100.0$ & $0.6$ \\
+        7 & $377$ & $99.5$ & $77.5$ \\
+        8 & $95$ & $98.9$ & $0.0$ \\
+        9 & $91$ & $98.9$ & $0.0$ \\
+        10 & $121$ & $100.0$ & $0.0$ \\
+        11 & $120$ & $100.0$ & $0.0$ \\
+        12 & $47$ & $97.9$ & $0.0$ \\
+        13 & $89$ & $98.9$ & $0.0$ \\
+        14 & $28$ & $92.9$ & $0.0$ \\
+        15 & $70$ & $100.0$ & $0.0$ \\
+        16 & $294$ & $100.0$ & $71.8$ \\
+        \midrule
+        \textbf{Overall} & \textbf{1,854} & \textbf{99.1} & \textbf{27.2} \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\section{Robustness of Value Function: Detailed Metrics for Baseline and FLASH}
+\label{sec:appendix_value_robustness}
+This section provides the complete quantitative results for the value function robustness evaluation discussed in Section~\ref{subsec:robustness_value}. We evaluate the consistency of the predicted value against the 17 sequential stages of igloo construction under frozen background contexts.
+
+\begin{table}[h]
+    \centering
+    \caption{Correlation coefficients of predicted state values against igloo construction stages (0--16). Metric 1 measures the average correlation across individual noisy sequences, demonstrating FLASH's superior resistance to spatial entanglement. Metric 2 measures the correlation of the globally averaged value profile.}
+    \label{tab:value_metrics}
+    \begin{tabular}{lcccc}
+        \toprule
+        \textbf{Model} & \multicolumn{2}{c}{\textbf{Metric 1 (Per-Sequence Avg.)}} & \multicolumn{2}{c}{\textbf{Metric 2 (Global Average Profile)}} \\
+        \cmidrule(lr){2-3} \cmidrule(lr){4-5}
+        & Spearman's $\rho$ ($\uparrow$) & Kendall's $\tau$ ($\uparrow$) & Spearman's $\rho$ & Kendall's $\tau$ \\
+        \midrule
+        Baseline (STORM) & $0.0668$ & $0.0315$ & $0.9632$ & $0.8824$ \\
+        FLASH (Ours) & $\mathbf{0.1447}$ & $\mathbf{0.1180}$ & $0.6373$ & $0.5441$ \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\begin{table}[h]
+    \centering
+    \caption{Global Average Value by Igloo Stage (averaged across 17,496 evaluation frames). The Baseline demonstrates a naive, monotonic increase, overfitting to pixel quantity. Conversely, FLASH captures the realistic, escalating survival risk inherent in the game's later stages, peaking at Stage 11 and dropping as the igloo nears completion.}
+    \label{tab:global_average_values}
+    \begin{tabular}{crr}
+        \toprule
+        \textbf{Igloo Stage} & \textbf{Baseline Global Avg Value} & \textbf{FLASH Global Avg Value} \\
+        \midrule
+        00 & 127.5691 & 125.2802 \\
+        01 & 135.9656 & 141.3974 \\
+        02 & 140.2887 & 151.5935 \\
+        03 & 145.0847 & 156.2869 \\
+        04 & 148.7062 & 161.6628 \\
+        05 & 150.5298 & 168.0688 \\
+        06 & 148.8048 & 172.0754 \\
+        07 & 150.3007 & 177.6254 \\
+        08 & 150.6747 & 179.3095 \\
+        09 & 150.4447 & 181.7165 \\
+        10 & 151.1262 & 183.2160 \\
+        11 & 156.0479 & \textbf{185.9767} \\
+        12 & 161.0758 & 185.9596 \\
+        13 & 157.5797 & 179.8149 \\
+        14 & 156.2392 & 173.7596 \\
+        15 & 159.1790 & 167.9141 \\
+        16 & \textbf{164.7938} & 170.7361 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+
+
+\section{Detailed Probing Experiments and Robustness Analysis}
+\label{sec:appendix_detailed_probing}
+This section provides the comprehensive experimental setup and extended results for the probing and noise injection experiments summarized in Section~\ref{subsec:probing_latent}.
+
+\subsection{Preliminary Observation: The Cosine Similarity Clue}
+To formally investigate whether the encoder successfully captures functionally critical, yet small and static elements, we designed a motivating experiment. Instead of a single comparison, we generated two comprehensive sets of images by fixing the background to be perfectly identical and replacing only the diver regions to vary the target elements: one varying the number of collected divers at the bottom area (from 0 to 6), and another varying the position of a single diver on the sea area. We then extracted their latent states and computed the pairwise cosine similarities.
+
+\begin{figure}[h]
+\centering
+\begin{minipage}{0.48\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{heatmap/diver_count.jpg}
+  \caption{Cosine Similarity: Diver Count (0-6)}
+  \label{fig:heatmap_count}
+\end{minipage}\hfill
+\begin{minipage}{0.48\textwidth}
+  \centering
+  \includegraphics[width=\linewidth]{heatmap/diver_location.jpg}
+  \caption{Cosine Similarity: Diver Position}
+  \label{fig:heatmap_position}
+\end{minipage}
+\caption{Cosine similarity heatmaps of latent states in Seaquest. If the lightweight encoder had completely ignored these small, static elements, the similarities would be uniformly 1.0. The distinct structured patterns strongly indicate that the encoder maps these critical features into the latent space.}
+\label{fig:heatmaps}
+\end{figure}
+
+As shown in Figure~\ref{fig:heatmaps}, both heatmaps reveal distinct structural patterns rather than a uniform similarity of 1.0. For the diver count (left), states with similar counts exhibit high cosine similarity ($0.93$--$0.98$), while states with larger count differences drop as low as $0.86$. For the diver position (right), we fixed the submarine at the center and moved a single diver from the far left edge to just left of the submarine; as displacement increases, the similarity degrades down to $0.63$. If the encoder had ignored these small, static elements, all similarities would be 1.0. The fact that they dynamically reflect the underlying game state provides a strong clue that the encoder maps these critical features into the latent space, motivating our subsequent probing analysis.
+
+\subsection{Probing the Latent Space}
+\label{subsec:appendix_probing_latent}
+To verify the latent state $z$ contains important yet small particles like divers, we conducted a probing experiment on the Seaquest environment, known for its extreme sparse rewards and tiny objects. We detached the pre-trained encoder (stopping gradient flow) and trained a lightweight MLP to predict ground-truth RAM states directly from $z$. Crucially, we evaluated a suboptimal agent—one that merely hunts fish and never learns the complex behavior of collecting 6 divers and surfacing. To test the zero-shot generalization capability of the \textit{encoder}, we extracted latents from manually collected demonstration data containing rare states of 4 to 6 collected divers—states the encoder had never encountered during its own unsupervised pre-training phase. These zero-shot latents were then merged with a newly collected rollout dataset from the trained agent (entirely independent of the encoder's original replay buffer) to train the probing MLP.
+
+Our results reveal that the MLP can predict the underlying game state with astonishing accuracy, even from this "failed" agent's encoder. First, for classifying the number of collected divers at the bottom (0 to 6), the probe achieved an overall accuracy of 99.6\%. Most remarkably, despite the encoder having never seen 4 to 6 divers during its representation learning phase, it successfully mapped these novel observations into highly separable latent clusters, allowing the MLP to correctly classify these rare minority classes with $>93\%$ accuracy.
+
+Second, we tasked the probe with predicting the exact $(x, y)$ coordinates of multiple dynamic divers swimming on the screen. Since up to 4 divers can appear simultaneously, simply assigning fixed output slots to specific lanes introduces a structural bias. To ensure a strictly fair evaluation, we formulated this as a Set Prediction problem and employed a Permutation-Invariant Bipartite Matching Loss, inspired by modern object detection frameworks like DETR. The MLP was forced to output an unordered set of 4 object predictions (presence probability and coordinates), which were then optimally matched to the ground-truth divers via Hungarian matching. Using this rigorous setup, the probe achieved $92.4\%$ accuracy for predicting diver presence, and an average spatial error of $12.44$ pixels for pinpointing their precise $(x, y)$ locations. This confirms that the latent space perfectly encapsulates structured, disentangled spatial semantics of multiple objects, completely refuting the assumption that poor decoder reconstructions imply missing latent information.
+
+It is important to acknowledge that the Atari 2600 emulator exhibits an intrinsic temporal and spatial misalignment between the internal RAM state and the rendered visual frame. For instance, when the submarine collects a diver, the RAM counter increments immediately, but the visual rendering of the diver often persists on the screen for an additional frame before being visually absorbed. Similarly, minor discrepancies exist between the exact pixel locations of moving sprites and their corresponding RAM values due to the Atari hardware's rendering cycle. These hardware-level asynchronies impose an irreducible upper bound on probing accuracy. We strongly argue that any residual errors---such as the remaining $0.4\%$ error in diver counting and the $\sim 12.44$ pixel distance error (which translates to less than 5 pixels on the $64 \times 64$ encoder input space) in multi-diver spatial localization---are largely attributable to this emulator-level label noise rather than missing latent information (see Appendix \ref{sec:appendix_ram_misalignment} for a detailed visual verification).
+
+\subsection{Robustness to Spatial Noise: Validating the Blurring Hypothesis}
+Recent works advocating for Diffusion models \citep{alonso2024diffusion} hypothesize that standard encoders (e.g., those relying on discrete tokenization or patch-based CNN/ViT architectures) fail to preserve small visual details because they "blur" or "entangle" spatial information. To rigorously test this hypothesis, we injected extreme random uniform noise into the background spaces of the original observations, leaving only the bounding box of the target objects perfectly intact. We conducted this experiment across two distinct domains: classifying the number of bottom divers in Seaquest, and classifying the igloo construction stages (0--16 blocks) in Frostbite. (For full details on the MLP training procedure and rigorous evaluation setup, see Section~\ref{subsec:appendix_probing_latent}.)
+
+If the latent representations were perfectly disentangled, the extreme noise in other spatial locations would not interfere with the local target features, and probing accuracy would remain pristine. However, when evaluated on these noise-injected images, our probing MLP's classification accuracy plummeted drastically. As detailed in Table~\ref{tab:per_class_noise}, in Seaquest, accuracy dropped from $99.6\%$ (clean) to $68.1\%$ (effectively random chance, as it converged to predicting the majority class). We observed an even more dramatic collapse in Frostbite (Table~\ref{tab:per_class_noise_frostbite}), where the accuracy for predicting the igloo stage fell from a pristine $99.2\%$ down to $27.7\%$ upon background noise injection. This precipitous drop empirically validates the blurring hypothesis: standard encoders \textit{do} suffer from spatial entanglement. The global background noise inevitably bleeds into and corrupts the local representations of the target objects, likely through overlapping receptive fields or global normalization operations.
+
+\begin{table}[h]
+    \centering
+    \caption{Per-class classification accuracy for bottom diver counting in Seaquest. The clean setting uses the uncorrupted $64 \times 64$ observation, while the noisy setting injects uniform random noise everywhere except the tight bounding box containing the divers. The precipitous drop in minority class accuracy empirically demonstrates spatial entanglement within the frozen encoder.}
+    \label{tab:per_class_noise}
+    \begin{tabular}{crrr}
+        \toprule
+        \textbf{Diver Count} & \textbf{Samples ($n$)} & \textbf{Clean Accuracy (\%)} & \textbf{Noisy Accuracy (\%)} \\
+        \midrule
+        0 & $39,767$ & $99.8$ & $96.9$ \\
+        1 & $17,003$ & $99.3$ & $9.8$ \\
+        2 & $1,374$ & $95.8$ & $0.0$ \\
+        3 & $260$ & $95.4$ & $0.0$ \\
+        4 & $146$ & $95.9$ & $0.0$ \\
+        5 & $417$ & $96.9$ & $0.0$ \\
+        6 & $110$ & $90.9$ & $0.0$ \\
+        \midrule
+        \textbf{Overall} & \textbf{59,077} & \textbf{99.5} & \textbf{68.1} \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\begin{table}[h]
+    \centering
+    \caption{Per-class classification accuracy for igloo construction stages (0--16) in Frostbite. Similar to Seaquest, injecting background noise outside the igloo bounding box severely degrades the probing accuracy, confirming that the standard encoder entangles the igloo's representation with the surrounding environment.}
+    \label{tab:per_class_noise_frostbite}
+    \begin{tabular}{crrr}
+        \toprule
+        \textbf{Igloo Stage} & \textbf{Samples ($n$)} & \textbf{Clean Accuracy (\%)} & \textbf{Noisy Accuracy (\%)} \\
+        \midrule
+        0 & $153$ & $99.3$ & $0.0$ \\
+        1 & $26$ & $96.2$ & $0.0$ \\
+        2 & $25$ & $92.0$ & $0.0$ \\
+        3 & $28$ & $100.0$ & $0.0$ \\
+        4 & $77$ & $98.7$ & $0.0$ \\
+        5 & $54$ & $100.0$ & $0.0$ \\
+        6 & $159$ & $100.0$ & $0.6$ \\
+        7 & $377$ & $99.7$ & $75.6$ \\
+        8 & $95$ & $98.9$ & $0.0$ \\
+        9 & $91$ & $98.9$ & $0.0$ \\
+        10 & $121$ & $100.0$ & $0.0$ \\
+        11 & $120$ & $98.3$ & $0.0$ \\
+        12 & $47$ & $97.9$ & $0.0$ \\
+        13 & $89$ & $97.8$ & $0.0$ \\
+        14 & $28$ & $92.9$ & $0.0$ \\
+        15 & $70$ & $100.0$ & $0.0$ \\
+        16 & $294$ & $100.0$ & $77.6$ \\
+        \midrule
+        \textbf{Overall} & \textbf{1,854} & \textbf{99.2} & \textbf{27.7} \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+Crucially, however, our prior findings---specifically that the cosine similarity strictly drops below 1.0 when only the diver count is varied, alongside the $99.6\%$ clean probing accuracy---prove that the essential semantic information is \textit{not} fundamentally lost or erased by the encoder; it is merely \textit{blurred} across the latent space. This distinction is paramount. We fully acknowledge that replacing the encoder with a topology-preserving, high-fidelity alternative (such as a Diffusion model) is a fundamental and effective solution to address this blurring issue. However, at present, such generative models incur prohibitive computational costs and severe latency. 
+
+By distinguishing between ``information loss'' and ``information blurring,'' we challenge the prevailing prejudice that modifying the encoder is the \textit{only} viable solution. Because the information remains perfectly preserved (albeit entangled) in the lightweight encoder's latent space, the immediate failure actually stems from the Actor-Critic's inability to extract and utilize these entangled representations. This critical insight motivates our proposed method, FLASH. Instead of fixing the blur at the encoder level with massive overhead, FLASH attacks the problem at the Actor-Critic optimization level. By retrieving structurally aliased historical contexts and injecting them into the same training batch, FLASH naturally pressures the Actor-Critic to closely contrast and disentangle subtle differences between highly similar, blurred states, achieving robust performance with near-zero time delay.
+
+\section{Extended Analysis of the Actor-Critic Bottleneck}
+\label{sec:appendix_ac_bottleneck}
+This section provides further details and visualizations regarding the exploitation failure and value spike challenges summarized in Section~\ref{subsec:ac_intervention}.
+
+\label{sec:bottleneck}
+
+\subsection{Insufficient Exploitation of Successful Trajectories}
+Having established in Section~\ref{sec:representation} that the encoder already captures rich semantic information, we now investigate the downstream optimization process. We observe that even when some seeds discover high-reward trajectories during training, the Actor-Critic often fails to fully capitalize on them, resulting in evaluation scores far below the potential suggested by its best episodes.
+
+\begin{figure}[h]
+\centering
+\todo{Insert a bar chart comparing "highest episode score during training" and "final evaluation score" side-by-side for each seed. A larger gap visually demonstrates the failure to exploit.}
+\caption{\todo{Graph comparing the highest episode score during training vs. final evaluation score for each seed. The gap, where a high episode score is achieved but not reproduced in the final evaluation, illustrates the exploitation failure of AC optimization.}}
+\label{fig:seed_variance}
+\end{figure}
+
+As shown in Figure~\ref{fig:seed_variance}, despite access to the same high-quality representations, evaluation scores vary dramatically across seeds. This gap between the best episodes encountered during training and the final evaluation performance reveals that the Actor-Critic optimization process is the primary bottleneck\u2014not in its ability to represent the world, but in its ability to \textit{exploit} what it has already discovered. This observation directly motivates the design of an exploitation amplifier.
+
+\subsection{The Challenge of Delayed Rewards and Value Spikes}
+Environments like Seaquest or Frostbite often require the agent to complete complex sub-goals (e.g., collecting multiple divers or building an igloo) before receiving a massive reward. In such scenarios, the agent may occasionally stumble upon a breakthrough during random exploration, causing a sudden, massive spike in the true state value. Traditional Actor-Critic architectures struggle to efficiently stabilize and learn from these rare, high-variance value spikes, often losing the critical exploratory signal in the noise of standard transitions.
+
+\end{document}

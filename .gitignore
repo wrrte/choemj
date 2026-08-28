@@ -6,3 +6,16 @@
 .npm/
 .ssh/
 snap/
+__pycache__/
+Drama/
+Drama_modified/
+dreamerv3/
+dubby/
+graduate_research/
+STORM/
+TWISTER/
+EDELINE/
+wandb_logs/
+.netrc
+.nv/
+images/
