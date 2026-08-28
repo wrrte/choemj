@@ -1,0 +1,8 @@
+.antigravity-ide-server/
+.bash_history
+.cache/
+.config/
+.gemini/
+.npm/
+.ssh/
+snap/
