@@ -252,32 +252,32 @@ Table~\ref{tab:main_performance} presents the comprehensive Atari 100k results.
 \toprule
 Game & Random & Human & STORM & STORM+ours & DRAMA & DRAMA+ours & EDELINE & EDELINE+ours \\
 \midrule
-Alien         & 227.8 & 7127.7 & 882.5 & 983 & - & - & - & - \\
-Amidar        & 5.8 & 1719.5 & 191.2 & 215.2 & - & - & - & - \\
-Assault       & 222.4 & 742.0 & 643.7 & 717.5 & - & - & - & - \\
-Asterix       & 210.0 & 8503.3 & 515 & 682.5 & - & - & - & - \\
-BankHeist     & 14.2 & 753.1 & 431 & 415.5 & - & - & - & - \\
-BattleZone    & 2360.0 & 37187.5 & 10600 & 11850 & - & - & - & - \\
-Boxing        & 0.1 & 12.1 & 81 & 86.25 & - & - & - & - \\
+Alien         & 227.8 & 7127.7 & 891 & 1039.2 & - & - & - & - \\
+Amidar        & 5.8 & 1719.5 & 204.8 & 147.8 & - & - & - & - \\
+Assault       & 222.4 & 742.0 & 662.7 & 723 & - & - & - & - \\
+Asterix       & 210.0 & 8503.3 & - & - & - & - & - & - \\
+BankHeist     & 14.2 & 753.1 & 163 & 169.5 & - & - & - & - \\
+BattleZone    & 2360.0 & 37187.5 & 10283.3 & 10933.3 & - & - & - & - \\
+Boxing        & 0.1 & 12.1 & - & - & - & - & - & - \\
 Breakout      & 1.7 & 30.5 & - & - & - & - & - & - \\
-ChopperCommand & 811.0 & 7387.8 & 1960 & 1130 & - & - & - & - \\
+ChopperCommand & 811.0 & 7387.8 & - & - & - & - & - & - \\
 CrazyClimber  & 10780.5 & 35829.4 & - & - & - & - & - & - \\
-DemonAttack   & 152.1 & 1971.0 & 171.75 & 144.5 & - & - & - & - \\
+DemonAttack   & 152.1 & 1971.0 & - & - & - & - & - & - \\
 Freeway       & 0.0 & 29.6 & - & - & - & - & - & - \\
-Frostbite     & 65.2 & 4334.7 & 1627 & 2133 & - & - & - & - \\
-Gopher        & 257.6 & 2412.5 & 4622 & 4061 & - & - & - & - \\
-Hero          & 1027.0 & 30826.4 & 10303 & 10110 & - & - & - & - \\
-Jamesbond     & 29.0 & 302.8 & 490 & 420 & - & - & - & - \\
-Kangaroo      & 52.0 & 3035.0 & 1730 & 1750 & - & - & - & - \\
-Krull         & 1598.0 & 2665.5 & - & - & - & - & - & - \\
-KungFuMaster  & 258.5 & 22736.3 & - & - & - & - & - & - \\
-MsPacman      & 307.3 & 6951.6 & 1907 & 1727 & - & - & - & - \\
-Pong          & -20.7 & 14.6 & - & - & - & - & - & - \\
+Frostbite     & 65.2 & 4334.7 & 2514 & 2611 & - & - & - & - \\
+Gopher        & 257.6 & 2412.5 & - & - & - & - & - & - \\
+Hero          & 1027.0 & 30826.4 & - & - & - & - & - & - \\
+Jamesbond     & 29.0 & 302.8 & - & - & - & - & - & - \\
+Kangaroo      & 52.0 & 3035.0 & 1470 & 1590 & - & - & - & - \\
+Krull         & 1598.0 & 2665.5 & 5311 & 5584.5 & - & - & - & - \\
+KungFuMaster  & 258.5 & 22736.3 & 23815 & 20245 & - & - & - & - \\
+MsPacman      & 307.3 & 6951.6 & - & - & - & - & - & - \\
+Pong          & -20.7 & 14.6 & 5.7 & 9.8 & - & - & - & - \\
 PrivateEye    & 24.9 & 69571.3 & - & - & - & - & - & - \\
-Qbert         & 163.9 & 13455.0 & 2779 & 3603 & - & - & - & - \\
+Qbert         & 163.9 & 13455.0 & 2778.8 & 3379.4 & - & - & - & - \\
 RoadRunner    & 11.5 & 7845.0 & - & - & - & - & - & - \\
-Seaquest      & 68.4 & 42054.7 & 454 & 523 & - & - & - & - \\
-UpNDown       & 533.4 & 11693.2 & 9044 & 11733 & - & - & - & - \\
+Seaquest      & 68.4 & 42054.7 & - & - & - & - & - & - \\
+UpNDown       & 533.4 & 11693.2 & - & - & - & - & - & - \\
 \midrule
 \#Superhuman ($\uparrow$) & 0 & N/A & - & - & - & - & - & - \\
 Mean ($\uparrow$) & 0.000 & 1.000 & - & - & - & - & - & - \\
@@ -299,7 +299,27 @@ Overall, the preliminary results indicate that our approach significantly stabil
 
 \begin{figure}[h]
 \centering
-\todo{Insert a 2x2 grid of learning curve graphs, overlaying FLASH and Baseline on each plot. Rows: Successful vs. Failed Seed. Columns: Episode Score vs. Evaluation Score. Expected trends to highlight: 'Episode Score' remains similar between FLASH and Baseline regardless of the seed. However, for the 'Evaluation Score' on a 'Successful Seed', FLASH should significantly outperform the Baseline by the final step. Since we only have final evaluation scores currently, make sure to measure and plot intermediate evaluation scores throughout training to clearly show this divergence.}
+
+% (a) Learning Dynamics (2x2 Learning Curves)
+\begin{minipage}{\textwidth}
+  \centering
+  \includegraphics[width=0.48\linewidth]{experiment/fig_episode_success.pdf} \hfill
+  \includegraphics[width=0.48\linewidth]{experiment/fig_eval_success.pdf} \\ \vspace{0.3cm}
+  \todo{Insert failed seed episode score here: e.g., \textbackslash includegraphics[width=0.48\linewidth]\{experiment/fig_episode_fail.pdf\}} \hfill
+  \todo{Insert failed seed eval score here: e.g., \textbackslash includegraphics[width=0.48\linewidth]\{experiment/fig_eval_fail.pdf\}} \\ \vspace{0.2cm}
+  \textbf{(a) Learning Dynamics of Representative Seeds}
+\end{minipage}
+
+\vspace{0.6cm}
+
+% (b) Final Score Distribution (Box + Swarm Plot)
+\begin{minipage}{\textwidth}
+  \centering
+  \includegraphics[width=0.7\linewidth]{experiment/fig_distribution.pdf} \\ \vspace{0.2cm}
+  \textbf{(b) Distribution of Final Evaluation Scores (20 Seeds)}
+\end{minipage}
+
+\caption{Amplification of Successful Exploration. \textbf{(a)} Learning curves for representative successful (top row) and failed (bottom row) seeds. While the Episode Scores (left) remain similar, FLASH acts as an "Exploitation Amplifier," significantly boosting the Evaluation Score (right) of the successful seed. (Note: The divergence between the curves before the warmup period ends at step 40k is an expected artifact of random number generator consumption for EMA tracking, as detailed in Appendix \ref{sec:appendix_rng_divergence}.) \textbf{(b)} The distribution of final evaluation scores across 20 seeds. The plot reveals that while the lower-bound performance remains identical (failed seeds), the upper-tail of the distribution is dramatically extended by FLASH.}
 \label{fig:exploitation_amplifier}
 \end{figure}
 
@@ -342,6 +362,11 @@ In this paper, we critique the recent trend of obsessing over visual representat
 \bibliographystyle{iclr2027_conference}
 
 \appendix
+
+\section{Implementation Details: Early Trajectory Divergence during Warmup}
+\label{sec:appendix_rng_divergence}
+As observed in our learning curves (e.g., Figure \ref{fig:exploitation_amplifier}), the performance of the Baseline and FLASH diverge even during the initial warmup phase ($t < 40,000$), despite FLASH not actively retrieving memories during this period. This divergence is an expected artifact of the implementation. During the warmup phase, FLASH actively calculates the temporal-difference (TD) errors and value differences to accumulate the Exponential Moving Average (EMA) statistics (as detailed in Section \ref{subsec:flash_method}). Evaluating these metrics involves network forward passes and sampling operations that consume the global Random Number Generator (RNG) state. Consequently, the sequence of random numbers used for subsequent action sampling shifts, leading to naturally diverging environment trajectories compared to the Baseline, which does not compute these statistics. We emphasize that this early divergence is purely due to RNG state consumption and not any premature retrieval intervention by FLASH.
+
 \section{Implementation Details: Causal Offset in Anchor Registration}
 \label{sec:appendix_causal_anchor}
 In our implementation based on STORM, the world model relies on a prior that predicts the current state based on observations up to the previous time step ($t-1$). Consequently, an abrupt spike in the value estimate or a large TD-error at step $t$ is heavily influenced by the transition dynamics resulting from the action taken at step $t-2$. To ensure that the retrieved context accurately encapsulates this causal action rather than just the resultant state, we specifically set the anchor offset to $\Delta_{\text{anchor}} = -2$. This shifts the retrieval anchor back to the precise moment the agent committed to the pivotal decision.
