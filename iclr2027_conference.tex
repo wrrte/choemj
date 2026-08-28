@@ -176,7 +176,7 @@ All Actor-Critic losses---policy, value, and entropy---are normalized by this re
 \textbf{Balancing Learning Speed Ratio:} This deliberate reduction in effective weight is critical. Since FLASH retrieves highly pivotal and structurally aligned states, it provides highly accurate directional gradient signals that significantly accelerate the Actor-Critic optimization. If we were to preserve the total weight (e.g., by setting $N_{\text{rand}} = N_{\text{total}} - M_{\text{valid}}$), the Actor-Critic would learn too rapidly and outpace the World Model, degrading overall performance. Reducing the total effective weight acts as a necessary synchronizer, ensuring the Actor-Critic pace matches the World Model. (We provide detailed ablations validating this weight reduction, including comparisons with a globally reduced random batch, in Appendix~\ref{sec:appendix_ablation_weight}).
 
 \paragraph{Warmup Curriculum.}
-During an initial warmup phase (the first $T_{\text{warm}}$ environment steps), the EMA statistics accumulate but no anchors are triggered and no retrieval occurs. This prevents noisy early-stage value estimates from corrupting the anchor selection process. Retrieval is activated only after the world model and value function have stabilized sufficiently.
+During an initial warmup phase (the first $T_{\text{warm}} = 50,000$ environment steps), the EMA statistics accumulate but no anchors are triggered and no retrieval occurs. This prevents noisy early-stage value estimates from corrupting the anchor selection process. Retrieval is activated only after the world model and value function have stabilized sufficiently. \todo{Update $T_{\text{warm}}$ value after hyperparameter tuning is complete.}
 
 \begin{algorithm}[t]
 \caption{FLASH: Fast Latent Anchor Search with Hashing}
@@ -228,10 +228,6 @@ FLASH overcomes this optimization bottleneck by retrieving these aliased histori
 \end{itemize}
 
 This mechanism effectively explains the discrepancy in our empirical results across different environments. In games like \textit{Frostbite}, occasional successes (e.g., building an igloo) provide strong, distinct value spikes. FLASH pairs these high-value states with aliased low-value states in the same batch, providing the necessary gradient catalyst for the Actor-Critic to successfully ``unblur'' the representation. Conversely, in extreme sparse reward games like \textit{Seaquest}, the agent may never randomly discover the terminal reward (e.g., collecting 6 divers and surfacing). Without this critical value spike, there is no strong gradient catalyst to force Destructive Separation. Even if FLASH groups 3-diver and 4-diver states together, their target values remain uniformly near zero, yielding no pressure to disentangle the blur. This highlights that FLASH is not a substitute for initial exploration, but an exceptionally efficient ``Exploitation Amplifier'' that extracts maximum utility from blurred representations once a reward signal is discovered.
-\subsection{Curriculum Activation}
-Retrieving episodes too early during training, when the world model and representations are still highly unstable, can introduce noisy signals. Therefore, we employ a curriculum activation strategy. Currently, we activate retrieval at 50,000 steps, which corresponds to exactly half of the total training steps.
-
-\todo{Change mechanism if there are better mechanism. Currently experimenting with a dynamic activation technique that fluidly adjusts the activation timing by tuning hyperparameters and monitoring performance metrics (e.g., reward increases).}
 
 \section{Experiments}
 \label{sec:experiments}
@@ -242,7 +238,6 @@ We evaluate our method across all 26 games of the Atari 100k benchmark.
 \subsection{Main Performance}
 Table~\ref{tab:main_performance} presents the comprehensive Atari 100k results. 
 
-\todo{성능이 늘어간 건 파란색, 줄어든 건 뻘건색 등으로 표기}
 
 \begin{table}[h]
 \centering
@@ -252,38 +247,38 @@ Table~\ref{tab:main_performance} presents the comprehensive Atari 100k results.
 \toprule
 Game & Random & Human & STORM & STORM+ours & DRAMA & DRAMA+ours & EDELINE & EDELINE+ours \\
 \midrule
-Alien         & 227.8 & 7127.7 & 891 & 1039.2 & - & - & - & - \\
-Amidar        & 5.8 & 1719.5 & 204.8 & 147.8 & - & - & - & - \\
-Assault       & 222.4 & 742.0 & 662.7 & 723 & - & - & - & - \\
+Alien         & 227.8 & 7127.7 & 891 & \textcolor{blue}{\textbf{1039.2}} & - & - & - & - \\
+Amidar        & 5.8 & 1719.5 & 204.8 & \textcolor{red}{\textbf{147.8}} & - & - & - & - \\
+Assault       & 222.4 & 742.0 & 662.7 & \textcolor{blue}{723} & - & - & - & - \\
 Asterix       & 210.0 & 8503.3 & - & - & - & - & - & - \\
-BankHeist     & 14.2 & 753.1 & 163 & 169.5 & - & - & - & - \\
-BattleZone    & 2360.0 & 37187.5 & 10283.3 & 10933.3 & - & - & - & - \\
+BankHeist     & 14.2 & 753.1 & 163 & \textcolor{blue}{169.5} & - & - & - & - \\
+BattleZone    & 2360.0 & 37187.5 & 10283.3 & \textcolor{blue}{10933.3} & - & - & - & - \\
 Boxing        & 0.1 & 12.1 & - & - & - & - & - & - \\
 Breakout      & 1.7 & 30.5 & - & - & - & - & - & - \\
 ChopperCommand & 811.0 & 7387.8 & - & - & - & - & - & - \\
 CrazyClimber  & 10780.5 & 35829.4 & - & - & - & - & - & - \\
 DemonAttack   & 152.1 & 1971.0 & - & - & - & - & - & - \\
 Freeway       & 0.0 & 29.6 & - & - & - & - & - & - \\
-Frostbite     & 65.2 & 4334.7 & 2514 & 2611 & - & - & - & - \\
+Frostbite     & 65.2 & 4334.7 & 2080.8 & \textcolor{blue}{\textbf{2524.2}} & - & - & - & - \\
 Gopher        & 257.6 & 2412.5 & - & - & - & - & - & - \\
 Hero          & 1027.0 & 30826.4 & - & - & - & - & - & - \\
 Jamesbond     & 29.0 & 302.8 & - & - & - & - & - & - \\
-Kangaroo      & 52.0 & 3035.0 & 1470 & 1590 & - & - & - & - \\
-Krull         & 1598.0 & 2665.5 & 5311 & 5584.5 & - & - & - & - \\
-KungFuMaster  & 258.5 & 22736.3 & 23815 & 20245 & - & - & - & - \\
+Kangaroo      & 52.0 & 3035.0 & 1470 & \textcolor{blue}{1590} & - & - & - & - \\
+Krull         & 1598.0 & 2665.5 & 5311 & \textcolor{blue}{5584.5} & - & - & - & - \\
+KungFuMaster  & 258.5 & 22736.3 & 23815 & \textcolor{red}{20245} & - & - & - & - \\
 MsPacman      & 307.3 & 6951.6 & - & - & - & - & - & - \\
-Pong          & -20.7 & 14.6 & 5.7 & 9.8 & - & - & - & - \\
+Pong          & -20.7 & 14.6 & 5.7 & \textcolor{blue}{\textbf{9.8}} & - & - & - & - \\
 PrivateEye    & 24.9 & 69571.3 & - & - & - & - & - & - \\
-Qbert         & 163.9 & 13455.0 & 2778.8 & 3379.4 & - & - & - & - \\
+Qbert         & 163.9 & 13455.0 & 2778.8 & \textcolor{blue}{\textbf{3379.4}} & - & - & - & - \\
 RoadRunner    & 11.5 & 7845.0 & - & - & - & - & - & - \\
 Seaquest      & 68.4 & 42054.7 & - & - & - & - & - & - \\
 UpNDown       & 533.4 & 11693.2 & - & - & - & - & - & - \\
 \midrule
-\#Superhuman ($\uparrow$) & 0 & N/A & - & - & - & - & - & - \\
-Mean ($\uparrow$) & 0.000 & 1.000 & - & - & - & - & - & - \\
-Median ($\uparrow$) & 0.000 & 1.000 & - & - & - & - & - & - \\
-IQM ($\uparrow$) & 0.000 & 1.000 & - & - & - & - & - & - \\
-Optimality Gap ($\downarrow$) & 1.000 & 0.000 & - & - & - & - & - & - \\
+\#Superhuman ($\uparrow$) & 0 & N/A & 2  & \textcolor{red}{\textbf{1}} & -  & -  & -  & -  \\
+Mean ($\uparrow$) & 0.000 & 1.000 & 0.719  & \textcolor{blue}{0.767} & -  & -  & -  & -  \\
+Median ($\uparrow$) & 0.000 & 1.000 & 0.472  & \textcolor{blue}{0.516} & -  & -  & -  & -  \\
+IQM ($\uparrow$) & 0.000 & 1.000 & 0.453  & \textcolor{blue}{0.506} & -  & -  & -  & -  \\
+Optimality Gap ($\downarrow$) & 1.000 & 0.000 & 0.511  & \textcolor{blue}{0.481} & -  & -  & -  & -  \\
 \bottomrule
 \end{tabular}
 }
@@ -300,14 +295,12 @@ Overall, the preliminary results indicate that our approach significantly stabil
 \begin{figure}[h]
 \centering
 
-% (a) Learning Dynamics (2x2 Learning Curves)
+% (a) Learning Dynamics (1x2 Learning Curves for Successful Seed)
 \begin{minipage}{\textwidth}
   \centering
   \includegraphics[width=0.48\linewidth]{experiment/fig_episode_success.pdf} \hfill
-  \includegraphics[width=0.48\linewidth]{experiment/fig_eval_success.pdf} \\ \vspace{0.3cm}
-  \todo{Insert failed seed episode score here: e.g., \textbackslash includegraphics[width=0.48\linewidth]\{experiment/fig_episode_fail.pdf\}} \hfill
-  \todo{Insert failed seed eval score here: e.g., \textbackslash includegraphics[width=0.48\linewidth]\{experiment/fig_eval_fail.pdf\}} \\ \vspace{0.2cm}
-  \textbf{(a) Learning Dynamics of Representative Seeds}
+  \includegraphics[width=0.48\linewidth]{experiment/fig_eval_success.pdf} \\ \vspace{0.2cm}
+  \textbf{(a) Learning Dynamics of a Representative Successful Seed}
 \end{minipage}
 
 \vspace{0.6cm}
@@ -319,7 +312,7 @@ Overall, the preliminary results indicate that our approach significantly stabil
   \textbf{(b) Distribution of Final Evaluation Scores (20 Seeds)}
 \end{minipage}
 
-\caption{Amplification of Successful Exploration. \textbf{(a)} Learning curves for representative successful (top row) and failed (bottom row) seeds. While the Episode Scores (left) remain similar, FLASH acts as an "Exploitation Amplifier," significantly boosting the Evaluation Score (right) of the successful seed. (Note: The divergence between the curves before the warmup period ends at step 40k is an expected artifact of random number generator consumption for EMA tracking, as detailed in Appendix \ref{sec:appendix_rng_divergence}.) \textbf{(b)} The distribution of final evaluation scores across 20 seeds. The plot reveals that while the lower-bound performance remains identical (failed seeds), the upper-tail of the distribution is dramatically extended by FLASH.}
+\caption{Amplification of Successful Exploration. \textbf{(a)} Learning curves for a representative successful seed. While the Episode Scores (left) remain similar, FLASH acts as an "Exploitation Amplifier," significantly boosting the Evaluation Score (right) of the successful seed. For seeds that fail to explore, the learning dynamics of FLASH and Baseline remain virtually identical and are omitted for brevity. (Note: The divergence between the curves before the warmup period ends at step 40k is an expected artifact of random number generator consumption for EMA tracking, as detailed in Appendix \ref{sec:appendix_rng_divergence}.) \textbf{(b)} The distribution of final evaluation scores across 20 seeds. The plot reveals that while the lower-bound performance remains identical (failed seeds), the upper-tail of the distribution is dramatically extended by FLASH.}
 \label{fig:exploitation_amplifier}
 \end{figure}
 
@@ -365,7 +358,7 @@ In this paper, we critique the recent trend of obsessing over visual representat
 
 \section{Implementation Details: Early Trajectory Divergence during Warmup}
 \label{sec:appendix_rng_divergence}
-As observed in our learning curves (e.g., Figure \ref{fig:exploitation_amplifier}), the performance of the Baseline and FLASH diverge even during the initial warmup phase ($t < 40,000$), despite FLASH not actively retrieving memories during this period. This divergence is an expected artifact of the implementation. During the warmup phase, FLASH actively calculates the temporal-difference (TD) errors and value differences to accumulate the Exponential Moving Average (EMA) statistics (as detailed in Section \ref{subsec:flash_method}). Evaluating these metrics involves network forward passes and sampling operations that consume the global Random Number Generator (RNG) state. Consequently, the sequence of random numbers used for subsequent action sampling shifts, leading to naturally diverging environment trajectories compared to the Baseline, which does not compute these statistics. We emphasize that this early divergence is purely due to RNG state consumption and not any premature retrieval intervention by FLASH.
+As observed in our learning curves (e.g., Figure \ref{fig:exploitation_amplifier}), the performance of the Baseline and FLASH diverge even during the initial warmup phase ($t < 50,000$), despite FLASH not actively retrieving memories during this period. This divergence is an expected artifact of the implementation. During the warmup phase, FLASH actively calculates the temporal-difference (TD) errors and value differences to accumulate the Exponential Moving Average (EMA) statistics (as detailed in Section \ref{subsec:flash_method}). Evaluating these metrics involves network forward passes and sampling operations that consume the global Random Number Generator (RNG) state. Consequently, the sequence of random numbers used for subsequent action sampling shifts, leading to naturally diverging environment trajectories compared to the Baseline, which does not compute these statistics. We emphasize that this early divergence is purely due to RNG state consumption and not any premature retrieval intervention by FLASH.
 
 \section{Implementation Details: Causal Offset in Anchor Registration}
 \label{sec:appendix_causal_anchor}
