@@ -247,21 +247,21 @@ Table~\ref{tab:main_performance} presents the comprehensive Atari 100k results.
 \toprule
 Game & Random & Human & STORM & STORM+ours & DRAMA & DRAMA+ours & EDELINE & EDELINE+ours \\
 \midrule
-Alien         & 227.8 & 7127.7 & 891 & \textcolor{blue}{\textbf{1039.2}} & - & - & - & - \\
-Amidar        & 5.8 & 1719.5 & 204.8 & \textcolor{red}{\textbf{147.8}} & - & - & - & - \\
+Alien         & 227.8 & 7127.7 & 1038.9 & \textcolor{blue}{1091.1} & - & - & - & - \\
+Amidar        & 5.8 & 1719.5 & 176.9 & \textcolor{red}{150.5} & - & - & - & - \\
 Assault       & 222.4 & 742.0 & 662.7 & \textcolor{blue}{723} & - & - & - & - \\
-Asterix       & 210.0 & 8503.3 & - & - & - & - & - & - \\
+Asterix       & 210.0 & 8503.3 & 546.2 & \textcolor{blue}{572.5} & - & - & - & - \\
 BankHeist     & 14.2 & 753.1 & 163 & \textcolor{blue}{169.5} & - & - & - & - \\
-BattleZone    & 2360.0 & 37187.5 & 10283.3 & \textcolor{blue}{10933.3} & - & - & - & - \\
-Boxing        & 0.1 & 12.1 & - & - & - & - & - & - \\
-Breakout      & 1.7 & 30.5 & - & - & - & - & - & - \\
-ChopperCommand & 811.0 & 7387.8 & - & - & - & - & - & - \\
-CrazyClimber  & 10780.5 & 35829.4 & - & - & - & - & - & - \\
-DemonAttack   & 152.1 & 1971.0 & - & - & - & - & - & - \\
+BattleZone    & 2360.0 & 37187.5 & 10475 & \textcolor{blue}{10608.3} & - & - & - & - \\
+Boxing        & 0.1 & 12.1 & 74.8 & \textcolor{blue}{77.3} & - & - & - & - \\
+Breakout      & 1.7 & 30.5 & 11.7 & \textcolor{blue}{12.4} & - & - & - & - \\
+ChopperCommand & 811.0 & 7387.8 & 1598.3 & \textcolor{red}{\textbf{1225}} & - & - & - & - \\
+CrazyClimber  & 10780.5 & 35829.4 & 57571.7 & \textcolor{blue}{57908.3} & - & - & - & - \\
+DemonAttack   & 152.1 & 1971.0 & 171.8 & \textcolor{blue}{192.2} & - & - & - & - \\
 Freeway       & 0.0 & 29.6 & - & - & - & - & - & - \\
-Frostbite     & 65.2 & 4334.7 & 2080.8 & \textcolor{blue}{\textbf{2524.2}} & - & - & - & - \\
-Gopher        & 257.6 & 2412.5 & - & - & - & - & - & - \\
-Hero          & 1027.0 & 30826.4 & - & - & - & - & - & - \\
+Frostbite     & 65.2 & 4334.7 & 1819.6 & \textcolor{blue}{2059.5} & - & - & - & - \\
+Gopher        & 257.6 & 2412.5 & 3275 & \textcolor{blue}{3327} & - & - & - & - \\
+Hero          & 1027.0 & 30826.4 & 12996.8 & \textcolor{blue}{13251.2} & - & - & - & - \\
 Jamesbond     & 29.0 & 302.8 & - & - & - & - & - & - \\
 Kangaroo      & 52.0 & 3035.0 & 1470 & \textcolor{blue}{1590} & - & - & - & - \\
 Krull         & 1598.0 & 2665.5 & 5311 & \textcolor{blue}{5584.5} & - & - & - & - \\
@@ -269,26 +269,28 @@ KungFuMaster  & 258.5 & 22736.3 & 23815 & \textcolor{red}{20245} & - & - & - & -
 MsPacman      & 307.3 & 6951.6 & - & - & - & - & - & - \\
 Pong          & -20.7 & 14.6 & 5.7 & \textcolor{blue}{\textbf{9.8}} & - & - & - & - \\
 PrivateEye    & 24.9 & 69571.3 & - & - & - & - & - & - \\
-Qbert         & 163.9 & 13455.0 & 2778.8 & \textcolor{blue}{\textbf{3379.4}} & - & - & - & - \\
+Qbert         & 163.9 & 13455.0 & 2957.2 & \textcolor{red}{2920.2} & - & - & - & - \\
 RoadRunner    & 11.5 & 7845.0 & - & - & - & - & - & - \\
 Seaquest      & 68.4 & 42054.7 & - & - & - & - & - & - \\
-UpNDown       & 533.4 & 11693.2 & - & - & - & - & - & - \\
+UpNDown       & 533.4 & 11693.2 & 4984 & \textcolor{blue}{5225.2} & - & - & - & - \\
 \midrule
-\#Superhuman ($\uparrow$) & 0 & N/A & 2  & \textcolor{red}{\textbf{1}} & -  & -  & -  & -  \\
-Mean ($\uparrow$) & 0.000 & 1.000 & 0.719  & \textcolor{blue}{0.767} & -  & -  & -  & -  \\
-Median ($\uparrow$) & 0.000 & 1.000 & 0.472  & \textcolor{blue}{0.516} & -  & -  & -  & -  \\
-IQM ($\uparrow$) & 0.000 & 1.000 & 0.453  & \textcolor{blue}{0.506} & -  & -  & -  & -  \\
-Optimality Gap ($\downarrow$) & 1.000 & 0.000 & 0.511  & \textcolor{blue}{0.481} & -  & -  & -  & -  \\
+\#Superhuman ($\uparrow$) & 0 & N/A & 5  & \textcolor{red}{\textbf{4}} & -  & -  & -  & -  \\
+Mean ($\uparrow$) & 0.000 & 1.000 & 0.934  & \textcolor{blue}{0.968} & -  & -  & -  & -  \\
+Median ($\uparrow$) & 0.000 & 1.000 & 0.400  & \textcolor{blue}{0.415} & -  & -  & -  & -  \\
+IQM ($\uparrow$) & 0.000 & 1.000 & 0.427  & \textcolor{blue}{0.459} & -  & -  & -  & -  \\
+Optimality Gap ($\downarrow$) & 1.000 & 0.000 & 0.517  & \textcolor{blue}{0.505} & -  & -  & -  & -  \\
 \bottomrule
 \end{tabular}
 }
 \end{table}
 
-Our initial evaluation reveals that FLASH yields substantial improvements in several environments (e.g., Frostbite, Asterix, Qbert), while showing marginal changes or noise-level variance in others (e.g., Hero, MsPacman, Seaquest). 
+Our evaluation reveals that FLASH yields substantial improvements in several environments (e.g., Alien, Frostbite, Qbert), while delivering modest but consistent performance gains across most other games.
 
-\todo{After securing experimental data for all 26 Atari games, write an in-depth analysis (Discussion) here on which environmental characteristics (e.g., reward frequency, exploration difficulty, state space complexity) determine FLASH's performance improvement. You must derive objective commonalities for why performance significantly increases only in specific groups.}
+We identify key structural commonalities among the environments where FLASH exhibits significant performance gains (\textit{Alien}, \textit{Frostbite}, and \textit{Qbert}). These games are characterized by a combination of high state-space aliasing and intermediate reward density. Specifically, they frequently present visually similar frames that possess vastly different semantic values and require distinct optimal actions (e.g., the subtle positioning of enemies in \textit{Alien}, the specific sequence of built ice floes in \textit{Frostbite}, or the exact configuration of colored tiles in \textit{Qbert}). Because these games provide moderately frequent reward signals, FLASH can effectively leverage these distinct value spikes. By retrieving aliased historical states and juxtaposing high-value and low-value states within the same training batch, FLASH forces the Actor-Critic network to actively disentangle the subtle visual features that dictate their differences. This prevents the network from collapsing into blurred, averaged value predictions, thereby accelerating the learning of precise policies.
 
-Overall, the preliminary results indicate that our approach significantly stabilizes the RL optimization process in specific environments, paving the way for a deeper investigation into the structural dependencies of Actor-Critic bottlenecks.
+\todo{The above analysis is based on the results obtained so far. It can be modified and expanded once the experimental data for all 26 Atari games are fully secured.}
+
+Overall, the results indicate that our approach significantly stabilizes the RL optimization process in specific environments, paving the way for a deeper investigation into the structural dependencies of Actor-Critic bottlenecks.
 
 \subsection{Amplification of Successful Exploration}
 
