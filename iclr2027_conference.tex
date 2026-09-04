@@ -65,6 +65,11 @@ Prior work has demonstrated that compact visual representations can discard or i
 \textbf{Episodic Control and Retrieval-Augmented RL.}
 Episodic control rapidly exploits successful historical experiences to accelerate learning. Early approaches, such as MFEC \citep{blundell2016model} and NEC \citep{pritzel2017neural}, utilized episodic memory for fast, non-parametric value estimation. Subsequent methods like EVA \citep{hansen2018fast} improved upon this by retrieving structurally similar past experiences to directly adjust and augment parametric value estimates. Further advancements have explored structuring these memories; for example, ERLAM \citep{zhu2020episodic} constructs explicit associative memory graphs for rapid trajectory propagation, while recent works have incorporated state abstraction \citep{li2023neural}. In these existing frameworks, the retrieved memory explicitly serves as a direct component of the value estimation or policy control. FLASH differs fundamentally in both methodology and overhead. Instead of performing heavy nearest-neighbor searches or constructing complex relational graphs to explicitly compute values, FLASH utilizes extremely lightweight hashing to identify structurally similar historical experiences. Crucially, FLASH injects these retrieved experiences directly into the Actor-Critic training batch. By simply reshaping the data distribution of the training batch, FLASH naturally enables an otherwise unchanged Actor-Critic learner to align or disentangle blurred representations, serving as a highly efficient plug-and-play augmentor rather than a standalone memory module.
 
+\textbf{Prioritized Experience Replay and Memory Selection.}
+Prior work has prioritized experience using TD-error \citep{schaul2015prioritized}, value-related signals \citep{cao2019high}, or model-based curiosity \citep{kauvar2023curious}. Beyond individual transitions, several approaches have explored sequence-level prioritization \citep{karimpanal2018experience, brittain2019prioritized}, while others tailored priority mechanisms specifically to address the distinct needs of actor-critic architectures \citep{saglam2023actor}. Historically, the magnitude of value change upon updates was also utilized in Prioritized Sweeping \citep{moore1993prioritized} to efficiently schedule backups. 
+
+In contrast to these approaches, we introduce the temporal value difference between consecutive states, $|V(s_t) - V(s_{t-1})|$, as an additional prioritization signal and multiplicatively combine it with the TD-error to identify states that are simultaneously uncertain and value-sensitive. This formulation differs fundamentally from prior methods: while approaches like HVPER \citep{cao2019high} additively combine TD-error and absolute value, our multiplicative combination of TD-error and temporal value difference provides a sharper, more context-aware trigger for pivotal events. Moreover, it is distinct from Prioritized Sweeping \citep{moore1993prioritized}, which relies on the value change before and after an update ($|V_{old}(s) - V_{new}(s)|$), rather than the temporal transition difference. Finally, whereas traditional prioritized replay frameworks conventionally manipulate the sampling probabilities of transitions, FLASH takes a simpler and more direct approach: we seamlessly inject triggered anchors directly into the imagination batch without altering the underlying replay sampling distribution.
+
 \section{Motivation: Re-evaluating Representation and Optimization Bottlenecks}
 \label{sec:representation}
 
@@ -249,38 +254,38 @@ Table~\ref{tab:main_performance} presents the comprehensive Atari 100k results.
 \toprule
 Game & Random & Human & STORM & STORM+ours & DRAMA & DRAMA+ours & EDELINE & EDELINE+ours \\
 \midrule
-Alien         & 227.8 & 7127.7 & 1038.9 & \textcolor{blue}{1091.1} & - & - & - & - \\
-Amidar        & 5.8 & 1719.5 & 176.9 & \textcolor{red}{150.5} & - & - & - & - \\
-Assault       & 222.4 & 742.0 & 662.7 & \textcolor{blue}{723} & - & - & - & - \\
-Asterix       & 210.0 & 8503.3 & 546.2 & \textcolor{blue}{572.5} & - & - & - & - \\
-BankHeist     & 14.2 & 753.1 & 163 & \textcolor{blue}{169.5} & - & - & - & - \\
-BattleZone    & 2360.0 & 37187.5 & 10475 & \textcolor{blue}{10608.3} & - & - & - & - \\
-Boxing        & 0.1 & 12.1 & 74.8 & \textcolor{blue}{77.3} & - & - & - & - \\
-Breakout      & 1.7 & 30.5 & 11.7 & \textcolor{blue}{12.4} & - & - & - & - \\
-ChopperCommand & 811.0 & 7387.8 & 1598.3 & \textcolor{red}{\textbf{1225}} & - & - & - & - \\
-CrazyClimber  & 10780.5 & 35829.4 & 57571.7 & \textcolor{blue}{57908.3} & - & - & - & - \\
-DemonAttack   & 152.1 & 1971.0 & 171.8 & \textcolor{blue}{192.2} & - & - & - & - \\
+Alien         & 227.8 & 7127.7 & 1041.8 & \textcolor{red}{975.1} & \textcolor{blue}{1091.1} & - & - & - \\
+Amidar        & 5.8 & 1719.5 & 175.9 & \textcolor{red}{166.3} & \textcolor{red}{150.5} & - & - & - \\
+Assault       & 222.4 & 742.0 & 662.7 & \textcolor{blue}{684.3} & \textcolor{blue}{723} & - & - & - \\
+Asterix       & 210.0 & 8503.3 & 546.2 & \textcolor{blue}{572.5} & \textcolor{blue}{572.5} & - & - & - \\
+BankHeist     & 14.2 & 753.1 & 163 & - & \textcolor{blue}{169.5} & - & - & - \\
+BattleZone    & 2360.0 & 37187.5 & 10575 & \textcolor{red}{9238.3} & \textcolor{blue}{10608.3} & - & - & - \\
+Boxing        & 0.1 & 12.1 & 74.8 & \textcolor{blue}{76.0} & \textcolor{blue}{77.3} & - & - & - \\
+Breakout      & 1.7 & 30.5 & 11.7 & \textcolor{blue}{12.3} & \textcolor{blue}{12.4} & - & - & - \\
+ChopperCommand & 811.0 & 7387.8 & 1598.3 & \textcolor{blue}{1615} & \textcolor{red}{\textbf{1225}} & - & - & - \\
+CrazyClimber  & 10780.5 & 35829.4 & 57571.7 & - & \textcolor{blue}{57908.3} & - & - & - \\
+DemonAttack   & 152.1 & 1971.0 & 171.8 & - & \textcolor{blue}{192.2} & - & - & - \\
 Freeway       & 0.0 & 29.6 & - & - & - & - & - & - \\
-Frostbite     & 65.2 & 4334.7 & 1819.6 & \textcolor{blue}{2059.5} & - & - & - & - \\
-Gopher        & 257.6 & 2412.5 & 3275 & \textcolor{blue}{3327} & - & - & - & - \\
-Hero          & 1027.0 & 30826.4 & 12996.8 & \textcolor{blue}{13251.2} & - & - & - & - \\
+Frostbite     & 65.2 & 4334.7 & 1807.5 & \textcolor{blue}{\textbf{2106.7}} & \textcolor{blue}{2059.5} & - & - & - \\
+Gopher        & 257.6 & 2412.5 & 3275 & - & \textcolor{blue}{3327} & - & - & - \\
+Hero          & 1027.0 & 30826.4 & 12996.8 & - & \textcolor{blue}{13251.2} & - & - & - \\
 Jamesbond     & 29.0 & 302.8 & - & - & - & - & - & - \\
-Kangaroo      & 52.0 & 3035.0 & 1470 & \textcolor{blue}{1590} & - & - & - & - \\
-Krull         & 1598.0 & 2665.5 & 5311 & \textcolor{blue}{5584.5} & - & - & - & - \\
-KungFuMaster  & 258.5 & 22736.3 & 23815 & \textcolor{red}{20245} & - & - & - & - \\
+Kangaroo      & 52.0 & 3035.0 & 1470 & - & \textcolor{blue}{1590} & - & - & - \\
+Krull         & 1598.0 & 2665.5 & 5311 & \textcolor{blue}{5447.5} & \textcolor{blue}{5584.5} & - & - & - \\
+KungFuMaster  & 258.5 & 22736.3 & 23815 & - & \textcolor{red}{20245} & - & - & - \\
 MsPacman      & 307.3 & 6951.6 & - & - & - & - & - & - \\
-Pong          & -20.7 & 14.6 & 5.7 & \textcolor{blue}{\textbf{9.8}} & - & - & - & - \\
+Pong          & -20.7 & 14.6 & 5.7 & - & \textcolor{blue}{\textbf{9.8}} & - & - & - \\
 PrivateEye    & 24.9 & 69571.3 & - & - & - & - & - & - \\
-Qbert         & 163.9 & 13455.0 & 2957.2 & \textcolor{red}{2920.2} & - & - & - & - \\
+Qbert         & 163.9 & 13455.0 & 2875.2 & \textcolor{red}{2690.6} & \textcolor{blue}{2920.2} & - & - & - \\
 RoadRunner    & 11.5 & 7845.0 & - & - & - & - & - & - \\
 Seaquest      & 68.4 & 42054.7 & - & - & - & - & - & - \\
-UpNDown       & 533.4 & 11693.2 & 4984 & \textcolor{blue}{5225.2} & - & - & - & - \\
+UpNDown       & 533.4 & 11693.2 & 5022 & \textcolor{blue}{5304.7} & \textcolor{blue}{5225.2} & - & - & - \\
 \midrule
-\#Superhuman ($\uparrow$) & 0 & N/A & 5  & \textcolor{red}{\textbf{4}} & -  & -  & -  & -  \\
-Mean ($\uparrow$) & 0.000 & 1.000 & 0.934  & \textcolor{blue}{0.968} & -  & -  & -  & -  \\
-Median ($\uparrow$) & 0.000 & 1.000 & 0.400  & \textcolor{blue}{0.415} & -  & -  & -  & -  \\
-IQM ($\uparrow$) & 0.000 & 1.000 & 0.427  & \textcolor{blue}{0.459} & -  & -  & -  & -  \\
-Optimality Gap ($\downarrow$) & 1.000 & 0.000 & 0.517  & \textcolor{blue}{0.505} & -  & -  & -  & -  \\
+\#Superhuman ($\uparrow$) & 0 & N/A & 2  & 2 & 2 & -  & -  & -  \\
+Mean ($\uparrow$) & 0.000 & 1.000 & 1.044  & \textcolor{blue}{1.071} & \textcolor{blue}{1.096} & -  & -  & -  \\
+Median ($\uparrow$) & 0.000 & 1.000 & 0.292  & \textcolor{red}{0.283} & \textcolor{blue}{0.304} & -  & -  & -  \\
+IQM ($\uparrow$) & 0.000 & 1.000 & 0.286  & \textcolor{blue}{0.297} & \textcolor{blue}{0.305} & -  & -  & -  \\
+Optimality Gap ($\downarrow$) & 1.000 & 0.000 & 0.598  & \textcolor{blue}{0.590} & \textcolor{blue}{0.585} & -  & -  & -  \\
 \bottomrule
 \end{tabular}
 }
