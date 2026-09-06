@@ -74,6 +74,7 @@ class RetrievalContextManager:
         self.threshold = float(config.get("threshold", 1.0))
         self.context_length = int(config.get("context_length", 8))
         self.max_bucket_size = int(config.get("max_bucket_size", 512))
+        self.anchor_weight = float(config.get("anchor_weight", 0.5))
         
         self.trigger_mode = config.get("trigger_mode", "absolute")
         self.anchor_offset = int(config.get("anchor_offset", -2))
@@ -372,8 +373,9 @@ class RetrievalContextManager:
         for group in final_anchor_groups:
             valid_group_obs = []
             valid_group_action = []
+            valid_is_anchor = []
             
-            for (p, env_idx) in group:
+            for idx, (p, env_idx) in enumerate(group):
                 valid = True
                 obs_chunk = []
                 action_chunk = []
@@ -400,12 +402,24 @@ class RetrievalContextManager:
                         
                     valid_group_obs.append(obs_tensor)
                     valid_group_action.append(action_tensor)
+                    valid_is_anchor.append(idx == 0)
                 
             if valid_group_obs:
                 valid_anchors_count += 1
-                group_weight = 1.0 / len(valid_group_obs)
-                for _ in range(len(valid_group_obs)):
-                    retrieved_weights.append(group_weight)
+                
+                L = len(valid_group_obs)
+                has_anchor = any(valid_is_anchor)
+                
+                if L == 1:
+                    weights = [1.0]
+                elif has_anchor:
+                    num_targets = L - 1
+                    weights = [self.anchor_weight if is_a else (1.0 - self.anchor_weight) / num_targets for is_a in valid_is_anchor]
+                else:
+                    weights = [1.0 / L] * L
+                    
+                for w in weights:
+                    retrieved_weights.append(w)
                 
                 retrieved_obs_list.extend(valid_group_obs)
                 retrieved_action_list.extend(valid_group_action)
