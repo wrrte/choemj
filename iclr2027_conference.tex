@@ -50,7 +50,7 @@ Our contributions are threefold:
 \begin{itemize}
     \item First, we use diagnostic probing to assess whether lightweight encoder representations retain task-relevant information despite poor visual reconstruction, finding that selected task variables can be decoded with high accuracy under clean observations.
     \item Second, motivated by this evidence, we investigate downstream Actor-Critic optimization as a way to better utilize the available representations without replacing the encoder with a heavier model.
-    \item Finally, we propose FLASH, an efficient retrieval mechanism that embodies this alternative approach. By effectively retrieving structurally aliased past experiences and grouping them within the same training batch, FLASH enables the Actor-Critic to naturally align or disentangle these blurred representations. In doing so, it seamlessly integrates into existing baselines as a plug-and-play module to elevate overall performance with minimal computational overhead.
+    \item Finally, we propose FLASH, a plug-and-play retrieval mechanism that groups structurally similar past experiences within the same Actor-Critic training batch, without modifying the underlying encoder architecture. On Atari 100k, FLASH improves the IQM human-normalized score of \todo{evaluated baselines} by \todo{relative IQM improvement}, with a total training time increase of \todo{measured training time overhead}.
 \end{itemize}
 
 \section{Related Work}
