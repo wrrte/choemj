@@ -155,7 +155,7 @@ where $r_t$ is the reward, $\gamma$ is the discount factor, and $d_t$ is the ter
 \bar{\mu}_e &\leftarrow (1-\alpha)\bar{\mu}_e + \alpha \cdot \mathbb{E}[\delta^{\text{TD}}_{e}], \quad
 \bar{\sigma}^2_e \leftarrow (1-\alpha)\bar{\sigma}^2_e + \alpha \cdot \text{Var}[\delta^{\text{TD}}_{e}], \label{eq:ema_update}
 \end{align}
-and analogously for $\Delta V$. The combined surprise metric is:
+and analogously for $\Delta V$. At each training step, we compute the surprise score using the EMA statistics from preceding batches, then update the statistics with the current batch, including during warmup. The combined surprise metric is:
 \begin{equation}
 S_t = \text{ReLU}\!\left(\frac{\delta^{\text{TD}}_t - \bar{\mu}_e}{\sqrt{\bar{\sigma}^2_e} + \epsilon}\right) \cdot \text{softplus}\!\left(\frac{\Delta V_t - \bar{\mu}^{V}_e}{\sqrt{\bar{\sigma}^{2,V}_e} + \epsilon}\right).
 \label{eq:surprise}
@@ -192,36 +192,50 @@ All Actor-Critic losses---policy, value, and entropy---are normalized by this re
 \textbf{Balancing Learning Speed Ratio:} This deliberate reduction in effective weight is critical. Since FLASH retrieves highly pivotal and structurally aligned states, it provides highly accurate directional gradient signals that significantly accelerate the Actor-Critic optimization. If we were to preserve the total weight (e.g., by setting $N_{\text{rand}} = N_{\text{total}} - M_{\text{valid}}$), the Actor-Critic would learn too rapidly and outpace the World Model, degrading overall performance. Reducing the total effective weight acts as a necessary synchronizer, ensuring the Actor-Critic pace matches the World Model. (We provide detailed ablations validating this weight reduction, including comparisons with a globally reduced random batch, in Appendix~\ref{sec:appendix_ablation_weight}).
 
 \paragraph{Warmup Curriculum.}
-During an initial warmup phase (the first $T_{\text{warm}} = 50,000$ environment steps), the EMA statistics accumulate but no anchors are triggered and no retrieval occurs. This prevents noisy early-stage value estimates from corrupting the anchor selection process. Retrieval is activated only after the world model and value function have stabilized sufficiently. \todo{Update $T_{\text{warm}}$ value after hyperparameter tuning is complete.}
+During an initial warmup phase (the first $T_{\text{warm}} = 50,000$ environment steps), world-model and Actor-Critic training proceed on their usual schedules, and the EMA statistics accumulate, but no anchors are registered and no retrieval occurs. Actor-Critic training uses randomly sampled contexts during this phase. This prevents noisy early-stage value estimates from corrupting the anchor selection process. In STORM, an initial Global Rebuild is performed at the last policy-training step before warmup ends to prepare the index for retrieval. Anchor registration and retrieval are activated after warmup. \todo{Update $T_{\text{warm}}$ value after hyperparameter tuning is complete.}
 
 \begin{algorithm}[t]
 \caption{FLASH: Fast Latent Anchor Search with Hashing}
 \label{alg:flash}
 \begin{algorithmic}[1]
 \REQUIRE Replay buffer $\mathcal{R}$, world model encoder $f_\theta$, critic $V_\psi$, hash function $h(\cdot)$
-\REQUIRE Hyperparameters: hash bits $B$, z-score threshold $\tau_z$, warmup steps $T_{\text{warm}}$, context length $L$, max anchors $M$, multiplier $m$, target $n$, rebuild threshold $\eta$, cooldown $C$
+\REQUIRE Hyperparameters: hash bits $B$, z-score threshold $\tau_z$, warmup steps $T_{\text{warm}}$, context length $L$, max anchors $M$, multiplier $m$, target $n$, batch size $N_{\text{total}}$ with $Mn \leq N_{\text{total}}$, rebuild threshold $\eta$, cooldown $C$
+\REQUIRE Total environment steps $T$, initial collection steps $T_{\text{init}}$ sufficient for replay sampling, world-model and Actor-Critic update intervals $I_{\text{WM}}$ and $I_{\text{AC}}$
 \STATE Initialize hash buckets $\{\mathcal{B}_k\}$, anchor queue $\mathcal{A} \leftarrow \emptyset$, EMA statistics
-\FOR{each environment step $t$}
-    \STATE Encode $z_t \leftarrow f_\theta(o_t)$, compute $k_t \leftarrow h(z_t)$
-    \STATE Insert pointer $(p_t, e)$ into $\mathcal{B}_{k_t}$
+\FOR{$t = 0,\ldots,T_{\text{init}}-1$}
+    \STATE Take a uniformly random action and store the transition in $\mathcal{R}$
 \ENDFOR
-\FOR{each world model training step (after warmup)}
-    \STATE Compute batch TD-errors $\delta^{\text{TD}}_t$ and value-differences $\Delta V_t$
-    \STATE Update EMA statistics via Eq.~\eqref{eq:ema_update}
-    \STATE Compute surprise $S_t$ via Eq.~\eqref{eq:surprise}
-    \IF{$\max_t S_t > \tau_z$}
-        \STATE Push anchor $(p_{t^*+\Delta_\text{anchor}}, e)$ into $\mathcal{A}$
+\STATE Continue with the same environment-step counter; $T_{\text{warm}}$ includes initial collection
+\FOR{$t = T_{\text{init}},\ldots,T-1$}
+    \STATE Interact with the environment and store the transition in $\mathcal{R}$
+    \STATE When indexing is active, encode posterior probabilities $z_t \leftarrow f_\theta(o_t)$ and insert $(p_t,e)$ into $\mathcal{B}_{h(z_t)}$
+    \IF{$t \bmod I_{\text{WM}} = 0$}
+        \STATE Sample a replay batch and update the world model
+        \STATE Compute batch TD-errors $\delta^{\text{TD}}_u$ and value-differences $\Delta V_u$
+        \STATE Compute $S_u$ using the existing EMA statistics (Eq.~\eqref{eq:surprise})
+        \STATE Update EMA statistics with the current batch (Eq.~\eqref{eq:ema_update}), including during warmup
+        \IF{$t \geq T_{\text{warm}}$}
+            \FOR{each sequence with $\max_{u \in \text{seq}} S_u > \tau_z$}
+                \STATE Set $u^* \leftarrow \arg\max_{u \in \text{seq}} S_u$ and register anchor $(p_{u^*+\Delta_\text{anchor}},e)$ in $\mathcal{A}$
+            \ENDFOR
+        \ENDIF
     \ENDIF
-\ENDFOR
-\FOR{each imagination step (policy training)}
-    \STATE Pop up to $M$ anchors from $\mathcal{A}$
-    \FOR{each anchor $a$ with key $k_a$}
-        \STATE Sample candidates from $\mathcal{B}_{k_a}$, re-encode, keep matches $\to \mathcal{N}_a$
-    \ENDFOR
-    \STATE Compose augmented batch $\mathcal{D}_{\text{imagine}}$ via Eq.~\eqref{eq:batch_compose}
-    \STATE Train Actor-Critic with weighted loss (Eq.~\eqref{eq:weighted_loss})
-    \IF{avg hit rate $< \eta$ and cooldown elapsed}
-        \STATE \textbf{Global Rebuild}: PCA $\to$ update $(W_{\text{proj}}, \mu)$, re-hash all $\mathcal{R}$
+    \IF{$t \bmod I_{\text{AC}} = 0$}
+        \STATE Initialize retrieved groups to $\emptyset$ and $N_{\text{ret}} \leftarrow 0$
+        \IF{$t \geq T_{\text{warm}}$}
+            \STATE Pop up to $M$ anchors from $\mathcal{A}$
+            \FOR{each anchor $a$ with key $k_a$}
+                \STATE Sample candidates from $\mathcal{B}_{k_a}$, re-encode, and retain up to $n$ matches including the anchor
+                \STATE Extract valid context windows to form $\mathcal{N}_a$
+            \ENDFOR
+            \STATE Set $N_{\text{ret}} \leftarrow \sum_a |\mathcal{N}_a|$
+        \ENDIF
+        \STATE Sample $N_{\text{total}}-N_{\text{ret}}$ random contexts and compose $\mathcal{D}_{\text{imagine}}$ (Eq.~\eqref{eq:batch_compose})
+        \STATE Assign group weights and unit weights to random contexts; generate imagined trajectories
+        \IF{initial rebuild is due just before warmup ends, or warmup has ended and the hit-rate/cooldown conditions hold}
+            \STATE \textbf{Global Rebuild}: update $(W_{\text{proj}},\mu)$ via PCA and re-hash $\mathcal{R}$
+        \ENDIF
+        \STATE Update Actor-Critic using Eq.~\eqref{eq:weighted_loss}
     \ENDIF
 \ENDFOR
 \end{algorithmic}
