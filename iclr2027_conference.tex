@@ -15,7 +15,7 @@
 % 빈칸(TODO)을 쉽게 찾을 수 있도록 강조하는 매크로
 \newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
 
-\title{FLASH: Amplifying Exploitation in Visual Reinforcement Learning through Episodic Retrieval}
+\title{Amplifying Exploitation in Visual Reinforcement Learning through Episodic Retrieval}
 
 \author{\todo{Author 1 Name} \\
 \todo{Author 1 Affiliation} \\
@@ -126,10 +126,8 @@ Having found that supervised probes can predict selected task-relevant variables
 
 Specifically, FLASH retrieves structurally similar historical experiences around salient learning events and groups them within the same training batch. We hypothesize that this targeted reuse can help the learner distinguish contexts with different return targets and reinforce useful behavior. This is a hypothesis about improving downstream utilization, rather than evidence that Actor-Critic optimization is the sole source of performance limitations.
 
-\section{Proposed Method: FLASH (Fast Latent Anchor Search with Hashing)}
+\section{METHODOLOGY}
 \label{sec:method}
-
-To efficiently distinguish aliased states and augment the Actor-Critic optimization process, we introduce FLASH.
 
 \subsection{Episodic Memory and Retrieval with FLASH}
 \label{subsec:flash_method}
@@ -312,31 +310,33 @@ Overall, the results indicate that our approach significantly stabilizes the RL 
 
 \subsection{Amplification of Successful Exploration}
 
+We examine how successful training experiences translate into evaluation performance using one training run per method. For each method, we evaluate the final checkpoint at 100k environment steps with 20 evaluation seeds, running one episode per evaluation seed. Each point in the resulting distribution is therefore an individual evaluation episode return from a fixed checkpoint.
+
 \begin{figure}[h]
 \centering
 
-% (a) Learning Dynamics (1x2 Learning Curves for Successful Seed)
+% (a) Learning dynamics of one selected training run per method
 \begin{minipage}{\textwidth}
   \centering
   \includegraphics[width=0.48\linewidth]{experiment/fig_episode_success.pdf} \hfill
   \includegraphics[width=0.48\linewidth]{experiment/fig_eval_success.pdf} \\ \vspace{0.2cm}
-  \textbf{(a) Learning Dynamics of a Representative Successful Seed}
+  \textbf{(a) Learning Dynamics of the Selected Training Runs}
 \end{minipage}
 
 \vspace{0.6cm}
 
-% (b) Final Score Distribution (Box + Swarm Plot)
+% (b) Episode returns from 20 evaluation seeds per final checkpoint
 \begin{minipage}{\textwidth}
   \centering
   \includegraphics[width=0.7\linewidth]{experiment/fig_distribution.pdf} \\ \vspace{0.2cm}
-  \textbf{(b) Distribution of Final Evaluation Scores (20 Seeds)}
+  \textbf{(b) Evaluation Episode Returns at 100k (20 Evaluation Seeds)}
 \end{minipage}
 
-\caption{Amplification of Successful Exploration. \textbf{(a)} Learning curves for a representative successful seed. While the Episode Scores (left) remain similar, FLASH acts as an "Exploitation Amplifier," significantly boosting the Evaluation Score (right) of the successful seed. For seeds that fail to explore, the learning dynamics of FLASH and Baseline remain virtually identical and are omitted for brevity. (Note: The divergence between the curves before the warmup period ends at step 40k is an expected artifact of random number generator consumption for EMA tracking, as detailed in Appendix \ref{sec:appendix_rng_divergence}.) \textbf{(b)} The distribution of final evaluation scores across 20 seeds. The plot reveals that while the lower-bound performance remains identical (failed seeds), the upper-tail of the distribution is dramatically extended by FLASH.}
+\caption{Amplification of Successful Exploration. \textbf{(a)} Training episode scores (left) and evaluation scores (right) for one selected training run per method. Both runs encounter high-return episodes during training. The early divergence during warmup is discussed in Appendix~\ref{sec:appendix_rng_divergence}. \textbf{(b)} Episode return distributions obtained by evaluating each selected run's fixed 100k-step checkpoint with 20 evaluation seeds. Each dot is the return of one evaluation episode. The distributions describe variation across evaluation episodes for these checkpoints; each method contributes a single training run. FLASH exhibits a higher median and upper quartile, while the minimum episode returns are similar.}
 \label{fig:exploitation_amplifier}
 \end{figure}
 
-A key property of FLASH is its ability to act as an "Exploitation Amplifier." As shown in Figure~\ref{fig:exploitation_amplifier}, if a seed manages to achieve a high episode score (e.g., $>800$) even once during early exploration, our method aggressively exploits this trajectory, pulling the overall evaluation score up to converge near the maximum achieved episode score. Conversely, for seeds that completely fail to explore (e.g., $<300$ points), there are no high-quality past experiences to retrieve, resulting in no artificial performance gain. This demonstrates that FLASH does not magically solve hardcore exploration, but ensures that rare, successful exploratory signals are never lost and are optimally absorbed by the policy.
+Figure~\ref{fig:exploitation_amplifier}(a) shows that both selected training runs attain similarly high episode returns, while FLASH achieves higher evaluation scores in the later stages of training. Panel (b) further shows that the final FLASH checkpoint yields higher median and upper-quartile episode returns across evaluation seeds. Together, these observations are consistent with more effective use of successful training experiences in the illustrated runs. The low-return points in panel (b) are individual evaluation outcomes of these trained checkpoints. Training runs that remain at low returns throughout learning constitute a separate failure to discover successful behavior; in our observations, the proportion of such training runs is unchanged by FLASH. The exploitation benefit examined here concerns evaluation performance after successful experiences have been encountered during training.
 
 \subsection{Computational Efficiency: Negligible Overhead}
 Because FLASH focuses solely on optimizing the Actor-Critic training rather than modifying the heavy representation models, it adds practically zero computational burden to the base model. 
