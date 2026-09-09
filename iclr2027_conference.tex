@@ -199,30 +199,26 @@ During an initial warmup phase (the first $T_{\text{warm}} = 50,000$ environment
 \label{alg:flash}
 \begin{algorithmic}[1]
 \REQUIRE Base agent, replay buffer $\mathcal{R}$, FLASH parameters from Section~\ref{subsec:flash_method} with $Mn \leq N_{\text{total}}$
-\REQUIRE Initial collection steps $T_{\text{init}}$ sufficient for replay sampling, total steps $T$, update intervals $I_{\text{WM}}, I_{\text{AC}}$
+\REQUIRE Initial collection steps $T_{\text{init}}$ sufficient for replay sampling, total steps $T$
 \STATE Initialize hash buckets, anchor queue $\mathcal{A}$, and EMA statistics
 \FOR{$t = 0,\ldots,T_{\text{init}}-1$}
     \STATE Collect a transition with a uniformly random action into $\mathcal{R}$
 \ENDFOR
 \FOR{$t = T_{\text{init}},\ldots,T-1$}
     \STATE Collect a transition into $\mathcal{R}$ and update the hash index (Stage 1)
-    \IF{$t \bmod I_{\text{WM}} = 0$}
-        \STATE Sample a replay batch and update the world model
-        \STATE Compute \textit{surprise} $S_u$ with existing EMA, then update EMA (Stage 2)
-        \IF{$t \geq T_{\text{warm}}$}
-            \STATE Register an anchor for each sequence with $\max_{u \in \text{seq}} S_u > \tau_z$
-        \ENDIF
+    \STATE Sample a replay batch and update the world model
+    \STATE Compute \textit{surprise} $S_u$ with existing EMA, then update EMA (Stage 2)
+    \IF{$t \geq T_{\text{warm}}$}
+        \STATE Register an anchor for each sequence with $\max_{u \in \text{seq}} S_u > \tau_z$
     \ENDIF
-    \IF{$t \bmod I_{\text{AC}} = 0$}
-        \STATE Initialize retrieved groups to $\emptyset$
-        \IF{$t \geq T_{\text{warm}}$}
-            \STATE Pop up to $M$ anchors; retrieve and re-verify up to $n$ contexts per group (Stage 3)
-        \ENDIF
-        \STATE Fill the remaining batch slots with random contexts (Eq.~\eqref{eq:batch_compose})
-        \STATE Generate imagined trajectories from the composed contexts
-        \STATE Apply Global Rebuild if due (Stage 3 and Warmup Curriculum)
-        \STATE Update Actor-Critic with group-weighted losses (Eq.~\eqref{eq:weighted_loss})
+    \STATE Initialize retrieved groups to $\emptyset$
+    \IF{$t \geq T_{\text{warm}}$}
+        \STATE Pop up to $M$ anchors; retrieve and re-verify up to $n$ contexts per group (Stage 3)
     \ENDIF
+    \STATE Fill the remaining batch slots with random contexts (Eq.~\eqref{eq:batch_compose})
+    \STATE Generate imagined trajectories from the composed contexts
+    \STATE Apply Global Rebuild if due (Stage 3 and Warmup Curriculum)
+    \STATE Update Actor-Critic with group-weighted losses (Eq.~\eqref{eq:weighted_loss})
 \ENDFOR
 \end{algorithmic}
 \end{algorithm}
