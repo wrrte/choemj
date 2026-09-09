@@ -174,7 +174,7 @@ For each retrieved group $\mathcal{N}_a$, we extract the preceding $L$-step cont
 \mathcal{D}_{\text{imagine}} = \underbrace{\{(o_{t-L:t},\, a_{t-L:t})\}_{i=1}^{N_\text{rand}}}_{\text{random samples}} \;\cup\; \underbrace{\bigcup_{a \in \text{popped}} \{(o^{(j)}_{t-L:t},\, a^{(j)}_{t-L:t})\}_{j \in \mathcal{N}_a}}_{\text{retrieved contexts (anchors + neighbors)}},
 \label{eq:batch_compose}
 \end{equation}
-where $N_{\text{rand}} = \max\big(0,\, N_{\text{total}} - N_{\text{ret}}\big)$, and $N_{\text{total}}$ is the base imagination batch size. Because we substitute $N_{\text{ret}}$ random samples with $N_{\text{ret}}$ retrieved contexts, the physical batch size is strictly maintained at $N_{\text{total}}$.
+where $N_{\text{rand}} = \max\big(0,\, N_{\text{total}} - N_{\text{ret}}\big)$, and $N_{\text{total}}$ is the base imagination batch size. We choose $M$ and $n$ such that $Mn \leq N_{\text{total}}$. Since each of the at most $M$ anchor groups contains at most $n$ contexts (including the anchor), $N_{\text{ret}} \leq Mn \leq N_{\text{total}}$. Consequently, $N_{\text{rand}} + N_{\text{ret}} = N_{\text{total}}$, so substituting retrieved contexts for random samples strictly preserves the physical batch size.
 
 To prevent any single anchor group from dominating the gradient---especially in the case of Constructive Alignment---each member within group $\mathcal{N}_a$ receives an \textbf{inverse-group weight} $w_j = 1/|\mathcal{N}_a|$, while every random sample receives $w=1$. Consequently, the total effective weight sum across the augmented batch becomes:
 \begin{equation}
