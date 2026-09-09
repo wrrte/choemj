@@ -198,44 +198,30 @@ During an initial warmup phase (the first $T_{\text{warm}} = 50,000$ environment
 \caption{FLASH: Fast Latent Anchor Search with Hashing}
 \label{alg:flash}
 \begin{algorithmic}[1]
-\REQUIRE Replay buffer $\mathcal{R}$, world model encoder $f_\theta$, critic $V_\psi$, hash function $h(\cdot)$
-\REQUIRE Hyperparameters: hash bits $B$, z-score threshold $\tau_z$, warmup steps $T_{\text{warm}}$, context length $L$, max anchors $M$, multiplier $m$, target $n$, batch size $N_{\text{total}}$ with $Mn \leq N_{\text{total}}$, rebuild threshold $\eta$, cooldown $C$
-\REQUIRE Total environment steps $T$, initial collection steps $T_{\text{init}}$ sufficient for replay sampling, world-model and Actor-Critic update intervals $I_{\text{WM}}$ and $I_{\text{AC}}$
-\STATE Initialize hash buckets $\{\mathcal{B}_k\}$, anchor queue $\mathcal{A} \leftarrow \emptyset$, EMA statistics
+\REQUIRE Base agent, replay buffer $\mathcal{R}$, FLASH parameters from Section~\ref{subsec:flash_method} with $Mn \leq N_{\text{total}}$
+\REQUIRE Initial collection steps $T_{\text{init}}$ sufficient for replay sampling, total steps $T$, update intervals $I_{\text{WM}}, I_{\text{AC}}$
+\STATE Initialize hash buckets, anchor queue $\mathcal{A}$, and EMA statistics
 \FOR{$t = 0,\ldots,T_{\text{init}}-1$}
-    \STATE Take a uniformly random action and store the transition in $\mathcal{R}$
+    \STATE Collect a transition with a uniformly random action into $\mathcal{R}$
 \ENDFOR
-\STATE Continue with the same environment-step counter; $T_{\text{warm}}$ includes initial collection
 \FOR{$t = T_{\text{init}},\ldots,T-1$}
-    \STATE Interact with the environment and store the transition in $\mathcal{R}$
-    \STATE When indexing is active, encode posterior probabilities $z_t \leftarrow f_\theta(o_t)$ and insert $(p_t,e)$ into $\mathcal{B}_{h(z_t)}$
+    \STATE Collect a transition into $\mathcal{R}$ and update the hash index (Stage 1)
     \IF{$t \bmod I_{\text{WM}} = 0$}
         \STATE Sample a replay batch and update the world model
-        \STATE Compute batch TD-errors $\delta^{\text{TD}}_u$ and value-differences $\Delta V_u$
-        \STATE Compute $S_u$ using the existing EMA statistics (Eq.~\eqref{eq:surprise})
-        \STATE Update EMA statistics with the current batch (Eq.~\eqref{eq:ema_update}), including during warmup
+        \STATE Compute surprise with existing EMA statistics, then update EMA (Stage 2)
         \IF{$t \geq T_{\text{warm}}$}
-            \FOR{each sequence with $\max_{u \in \text{seq}} S_u > \tau_z$}
-                \STATE Set $u^* \leftarrow \arg\max_{u \in \text{seq}} S_u$ and register anchor $(p_{u^*+\Delta_\text{anchor}},e)$ in $\mathcal{A}$
-            \ENDFOR
+            \STATE Register an anchor for each sequence whose maximum surprise exceeds $\tau_z$
         \ENDIF
     \ENDIF
     \IF{$t \bmod I_{\text{AC}} = 0$}
-        \STATE Initialize retrieved groups to $\emptyset$ and $N_{\text{ret}} \leftarrow 0$
+        \STATE Initialize retrieved groups to $\emptyset$
         \IF{$t \geq T_{\text{warm}}$}
-            \STATE Pop up to $M$ anchors from $\mathcal{A}$
-            \FOR{each anchor $a$ with key $k_a$}
-                \STATE Sample candidates from $\mathcal{B}_{k_a}$, re-encode, and retain up to $n$ matches including the anchor
-                \STATE Extract valid context windows to form $\mathcal{N}_a$
-            \ENDFOR
-            \STATE Set $N_{\text{ret}} \leftarrow \sum_a |\mathcal{N}_a|$
+            \STATE Pop up to $M$ anchors; retrieve and re-verify up to $n$ contexts per group (Stage 3)
         \ENDIF
-        \STATE Sample $N_{\text{total}}-N_{\text{ret}}$ random contexts and compose $\mathcal{D}_{\text{imagine}}$ (Eq.~\eqref{eq:batch_compose})
-        \STATE Assign group weights and unit weights to random contexts; generate imagined trajectories
-        \IF{initial rebuild is due just before warmup ends, or warmup has ended and the hit-rate/cooldown conditions hold}
-            \STATE \textbf{Global Rebuild}: update $(W_{\text{proj}},\mu)$ via PCA and re-hash $\mathcal{R}$
-        \ENDIF
-        \STATE Update Actor-Critic using Eq.~\eqref{eq:weighted_loss}
+        \STATE Fill the remaining batch slots with random contexts (Eq.~\eqref{eq:batch_compose})
+        \STATE Generate imagined trajectories from the composed contexts
+        \STATE Apply Global Rebuild if due (Stage 3 and Warmup Curriculum)
+        \STATE Update Actor-Critic with group-weighted losses (Eq.~\eqref{eq:weighted_loss})
     \ENDIF
 \ENDFOR
 \end{algorithmic}
