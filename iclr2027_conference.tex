@@ -326,7 +326,6 @@ Figure~\ref{fig:exploitation_amplifier}(a) shows that both selected training run
 
 \subsection{Computational Analysis}
 Because FLASH focuses solely on optimizing the Actor-Critic training rather than modifying the heavy representation models, it adds practically zero computational burden to the base model. 
-
 Since the latent dimension ($d$), hash bits ($B$), and other hyperparameters (e.g., context lengths, batch sizes) are strictly bounded constants, the algorithmic time complexity simplifies as follows:
 \begin{itemize}
     \item \textbf{Insertion per frame:} $\mathcal{O}(d \cdot B) \approx \mathcal{O}(1)$. The state encoding cost is completely absorbed by the world model's inherent forward pass.
