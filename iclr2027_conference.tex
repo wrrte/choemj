@@ -62,24 +62,19 @@ Our contributions are threefold:
 \section{Related Work}
 \label{sec:related}
 
-\textbf{Latent World Models and Imagination-Based RL.}
-Latent world models encode visual observations into compact states and learn dynamics that generate imagined trajectories for policy and value learning. Dreamer \citep{hafner2019dream} and DreamerV2 \citep{hafner2020mastering} established this approach through Actor-Critic learning in latent imagination. STORM \citep{zhang2023storm}, the primary base agent in our experiments, combines stochastic latent states with Transformer-based dynamics for efficient world-model learning and imagination. DRAMA \citep{wang2025drama} explores Mamba-based dynamics to improve sample and parameter efficiency. These approaches provide the setting for FLASH: we retain the underlying encoder and world-model architectures and augment the contexts used to initialize imagined trajectories for Actor-Critic training through targeted retrieval.
+\textbf{Latent World Models.}
+Dreamer and DreamerV2 learn policies through latent imagination \citep{hafner2019dream, hafner2020mastering}, while STORM and DRAMA use Transformer- and Mamba-based dynamics, respectively \citep{zhang2023storm, wang2025drama}. FLASH augments the contexts used for Actor-Critic imagination while retaining the base agent's encoder and world-model architectures.
 
 \todo{First conduct a brief feasibility study of porting FLASH to TWISTER as the third base agent. If the required changes are extensive, use TWM as the alternative. Finalize the third base agent after this assessment.}
 
-\textbf{Representation Learning in RL.} 
-Learning compact visual representations that retain information relevant for control is a central challenge in RL \citep{hafner2019learning}. Reconstruction-based objectives may inadequately preserve fine-grained details in complex environments. To mitigate this, a significant body of work has focused on improving the representation itself through auxiliary objectives. For instance, CURL \citep{laskin2020curl} introduced contrastive unsupervised learning, while SPR \citep{schwarzer2020data} enforced temporal predictive consistency to learn invariant representations. Approaches like ATC \citep{stooke2021decoupling} explicitly decoupled representation learning from policy optimization, demonstrating the value of structured latent spaces. More recently, DreamerPro \citep{deng2022dreamerpro} highlighted the limitations of visual reconstruction by adopting reconstruction-free, prototypical representations. Despite these advancements, the overarching paradigm has remained focused on modifying and improving the encoder itself. In this work, we take a fundamentally different perspective: we ask whether the spatial ambiguity left by a lightweight encoder can instead be effectively resolved downstream during the Actor-Critic optimization process, without requiring any modifications to the underlying encoder.
-
-\textbf{Generative and Diffusion World Models.}
-Prior work has demonstrated that compact visual representations can discard or inadequately preserve fine-grained visual details relevant to control. Recognizing that ``visual details matter,'' recent studies have increasingly turned to heavy generative models to preserve richer visual information. Most notably, DIAMOND \citep{alonso2024diffusion} replaces the discrete latent bottleneck with a diffusion-based world model, achieving high visual fidelity and robust performance by retaining complex environmental details. While these generative approaches successfully address the representation problem, they introduce substantial computational burdens and severe latency during both training and inference. FLASH offers an alternative: rather than relying on computationally prohibitive generative models to fix the encoder, we maintain the lightweight encoder and compensate for the resulting visual ambiguity through targeted downstream retrieval.
+\textbf{Representation Learning and Diffusion World Models.}
+Prior work improves visual representations through reconstruction \citep{hafner2019learning}, contrastive learning (CURL; \citealp{laskin2020curl}), predictive consistency (SPR; \citealp{schwarzer2020data}), decoupled representation learning (ATC; \citealp{stooke2021decoupling}), or prototypical learning (DreamerPro; \citealp{deng2022dreamerpro}). DIAMOND instead uses a diffusion world model to preserve visual detail \citep{alonso2024diffusion}. FLASH investigates better downstream use of compact representations through targeted experience reuse.
 
 \textbf{Episodic Control and Retrieval-Augmented RL.}
-Episodic control rapidly exploits successful historical experiences to accelerate learning. Early approaches include Model-Free Episodic Control (MFEC) \citep{blundell2016model}, which stores the highest observed returns for state-action pairs and uses nearest-neighbor lookup to estimate values for unseen states, and Neural Episodic Control (NEC) \citep{pritzel2017neural}, which combines learned state embeddings with a differentiable neural dictionary for rapid value estimation. Subsequent methods like EVA \citep{hansen2018fast} improved upon this by retrieving structurally similar past experiences to directly adjust and augment parametric value estimates. Further advancements have explored structuring these memories; for example, ERLAM \citep{zhu2020episodic} constructs explicit associative memory graphs for rapid trajectory propagation, while recent works have incorporated state abstraction \citep{li2023neural}. In these existing frameworks, the retrieved memory explicitly serves as a direct component of the value estimation or policy control. FLASH differs fundamentally in both methodology and overhead. Instead of performing heavy nearest-neighbor searches or constructing complex relational graphs to explicitly compute values, FLASH utilizes extremely lightweight hashing to identify structurally similar historical experiences. Crucially, FLASH injects these retrieved experiences directly into the Actor-Critic training batch. FLASH acts implicitly through the composition of the training batch, while retaining the existing Actor-Critic objectives and encoder architecture.
+MFEC, NEC, and EVA use episodic experience to inform value estimates \citep{blundell2016model, pritzel2017neural, hansen2018fast}; ERLAM and subsequent work further structure memory through associative graphs and state abstraction \citep{zhu2020episodic, li2023neural}. FLASH uses hashing to retrieve contexts around selected anchors and incorporates them into Actor-Critic training batches, acting implicitly through batch composition.
 
-\textbf{Prioritized Experience Replay and Memory Selection.}
-Prior work has prioritized experience using TD-error \citep{schaul2015prioritized}, value-related signals \citep{cao2019high}, or model-based curiosity \citep{kauvar2023curious}. Beyond individual transitions, several approaches have explored sequence-level prioritization \citep{karimpanal2018experience, brittain2019prioritized}, while others tailored priority mechanisms specifically to address the distinct needs of actor-critic architectures \citep{saglam2023actor}. Historically, the magnitude of value change upon updates was also utilized in Prioritized Sweeping \citep{moore1993prioritized} to efficiently schedule backups. 
-
-In contrast to these approaches, our method introduces two distinct novelties regarding the prioritization trigger that fundamentally differentiate it from existing prioritized replay mechanisms. First, instead of relying on absolute value, we utilize the \textbf{temporal value difference} between consecutive states ($|V(s_t) - V(s_{t-1})|$) to capture sudden, pivotal inflection points rather than persistently high-value plateaus. Moreover, this is distinct from Prioritized Sweeping \citep{moore1993prioritized}, which relies on the value change before and after a network update ($|V_{old}(s) - V_{new}(s)|$). Second, we propose a \textbf{multiplicative combination} of TD-error and value difference, contrasting with the additive combinations seen in methods like HVPER \citep{cao2019high}. This ensures the trigger fires only for events that are both highly surprising and value-sensitive, minimizing false positives.
+\textbf{Prioritized Experience Replay.}
+Experience selection has used TD-error \citep{schaul2015prioritized}, value signals \citep{cao2019high}, curiosity \citep{kauvar2023curious}, sequence priorities \citep{karimpanal2018experience, brittain2019prioritized}, and actor-critic-specific criteria \citep{saglam2023actor}. Prioritized Sweeping schedules backups using changes in value estimates \citep{moore1993prioritized}. FLASH selects anchors using a multiplicative score combining TD-error and signed temporal value difference, then retrieves structurally similar contexts for joint training. Appendix~\ref{sec:appendix_related_work} provides further background and comparisons.
 
 \section{Motivation: Re-evaluating Representation and Optimization Bottlenecks}
 \label{sec:representation}
@@ -129,12 +124,12 @@ Specifically, FLASH retrieves structurally similar historical experiences around
 \section{METHODOLOGY}
 \label{sec:method}
 
-\subsection{Episodic Memory and Retrieval with FLASH}
-\label{subsec:flash_method}
+FLASH maintains a lightweight episodic memory indexed by Locality-Sensitive Hashing (LSH), selects anchors using a surprise score, and retrieves structurally similar past contexts to augment Actor-Critic training batches. We describe the method in three parts: memory indexing and maintenance (Section~\ref{subsec:flash_memory}), anchor selection and retrieval (Section~\ref{subsec:flash_retrieval}), and integration into Actor-Critic learning (Section~\ref{subsec:flash_learning}). Algorithm~\ref{alg:flash} summarizes the execution order, and Figure~\ref{fig:flash_pipeline} illustrates the overall architecture.
 
-Instead of relying solely on parametric gradient updates, FLASH maintains a lightweight episodic memory indexed by Locality-Sensitive Hashing (LSH) and retrieves structurally similar past contexts to directly augment the Actor-Critic training batch. The pipeline consists of four stages: \textbf{(1) Hashing \& Indexing}, \textbf{(2) Surprise-based Anchor Triggering}, \textbf{(3) Lazy Retrieval with Re-verification}, and \textbf{(4) In-batch Injection with Inverse-Group Weighting}. We describe each stage below and summarize the complete procedure in Algorithm~\ref{alg:flash}. We additionally illustrate the overall architecture in Figure~\ref{fig:flash_pipeline}.
+\subsection{Hash-Indexed Episodic Memory}
+\label{subsec:flash_memory}
 
-\paragraph{Stage 1: Hashing \& Indexing.}
+\paragraph{Hashing and Indexing.}
 At every environment step, the world model observation encoder and posterior head, jointly denoted by $f_\theta$, map a single observation $o_t$ to a flattened posterior categorical probability vector $z_t = f_\theta(o_t) \in [0,1]^{d}$, where $d = K \times C$ with $K$ categorical variables each of $C$ classes. Specifically, STORM converts posterior logits to probabilities via softmax and applies \textit{unimix} (1\% uniform mixing), yielding $z_t = \operatorname{vec}(0.99\,\operatorname{softmax}(\ell_t) + 0.01/C)$, where $\ell_t \in \mathbb{R}^{K \times C}$ contains the raw posterior logits, softmax is applied over the $C$ classes of each variable, and $K=C=32$. Thus, hashing uses the resulting probabilities, rather than logits or sampled one-hot latent states, and excludes the world model's temporal hidden state. The same probability representation is used for insertion, re-verification, and Global Rebuild. We apply an LSH function $h: \mathbb{R}^d \to \{0,1,\ldots,2^B{-}1\}$ to produce a discrete hash key:
 \begin{equation}
 h(z_t) = \sum_{i=1}^{B} \mathbf{1}\!\left[\left(W_{\text{proj}}^\top (z_t - \mu)\right)_i > 0\right] \cdot 2^{i-1},
@@ -144,7 +139,13 @@ where $B$ is the number of hash bits, $\mu$ is the centering vector (initially $
 
 Each transition pointer $(p_t, e)$---where $p_t$ is the circular buffer index and $e$ is the environment index---is inserted into a hash bucket $\mathcal{B}_{h(z_t)}$. If a pointer's hash key changes (due to Global Rebuild), it is transparently migrated.
 
-\paragraph{Stage 2: Surprise-based Anchor Triggering.}
+\paragraph{Memory Maintenance.}
+As the encoder evolves, stored hash keys can become stale. We monitor the average hit rate, defined as the fraction of retrieval candidates passing re-verification (Section~\ref{subsec:flash_retrieval}). If this rate drops below a threshold $\eta$, a \textbf{Global Rebuild} is triggered: all hash buckets are cleared, the PCA projection $W_{\text{proj}}$ and mean $\mu$ are recomputed from a fresh encoding of the entire replay buffer, and all transitions are re-hashed. This refreshes the index to reflect the current representation, subject to a cooldown period to amortize cost.
+
+\subsection{Surprise-Guided Retrieval}
+\label{subsec:flash_retrieval}
+
+\paragraph{Anchor Selection.}
 TD-error magnitude is commonly used as a proxy for how surprising a transition is in prioritized replay \citep{schaul2015prioritized}. In FLASH, \textit{surprise} denotes an anchor-selection score that combines TD-error magnitude with the signed temporal value difference, rather than TD-error magnitude alone. During each world model training step, given a batch of sampled trajectories with value estimates $V(s_t)$ from the critic, we compute:
 \begin{align}
 \delta_t^{\text{TD}} &= \left| r_t + \gamma \, V(s_{t+1})(1 - d_t) - V(s_t) \right|, \label{eq:td_error} \\
@@ -162,13 +163,14 @@ S_t = \text{ReLU}\!\left(\frac{\delta^{\text{TD}}_t - \bar{\mu}_e}{\sqrt{\bar{\s
 \end{equation}
 By pairing a strict ReLU with a softplus, this formulation guarantees that it will never fire unless the TD-error is above average, regardless of how much the value spikes. Conversely, an extremely large TD-error can still trigger the anchor even if the value decreases slightly. This captures precisely the pivotal moments where a highly surprising or high-reward sub-trajectory is first discovered. For each trajectory sequence in the batch, when the maximum surprise score across its time steps exceeds the threshold ($\max_{t \in \text{seq}} S_t > \tau_z$), the corresponding buffer pointer (offset backwards by $\Delta_{\text{anchor}}$ steps to capture the critical preceding actions that caused the surprise; see Appendix~\ref{sec:appendix_causal_anchor} for architectural details) is registered as an \textit{active anchor} $a = (p_{t^*+\Delta_\text{anchor}},\, e)$ where $t^* = \text{argmax}_{t \in \text{seq}} S_t$, in a FIFO queue $\mathcal{A}$.
 
-\paragraph{Stage 3: Lazy Retrieval with Re-verification.}
-At each imagination step (where the agent generates imagined trajectories for policy training), FLASH pops up to $M$ anchors from $\mathcal{A}$. For each anchor $a$ with stored hash key $k_a$, we sample up to $m \times (n{-}1)$ candidate pointers from bucket $\mathcal{B}_{k_a}$ (excluding the anchor itself). To combat \textit{representation drift}---the gradual shift in hash keys as $f_\theta$ evolves---we perform \textbf{lazy re-verification}: each candidate's single-frame observation is re-encoded through the \textit{current} world model, and only candidates whose re-computed hash key matches $k_a$ are retained. This yields a set of verified neighbors $\mathcal{N}_a$ with $|\mathcal{N}_a| \leq n$, including the anchor itself.
+\paragraph{Neighbor Retrieval and Re-verification.}
+At each imagination step (where the agent generates imagined trajectories for policy training), FLASH pops up to $M$ anchors from $\mathcal{A}$. For each anchor $a$ with stored hash key $k_a$, we sample up to $m \times (n{-}1)$ candidate pointers from bucket $\mathcal{B}_{k_a}$ (excluding the anchor itself). To combat \textit{representation drift}---the gradual shift in hash keys as $f_\theta$ evolves---we perform \textbf{lazy re-verification}: each candidate's single-frame observation is re-encoded through the \textit{current} world model, and only candidates whose re-computed hash key matches $k_a$ are retained. This yields a set of verified neighbors $\mathcal{N}_a$ with $|\mathcal{N}_a| \leq n$, including the anchor itself. The re-verification hit rate is used to trigger the memory maintenance procedure in Section~\ref{subsec:flash_memory}.
 
-If the average hit rate (fraction of candidates passing re-verification) drops below a threshold $\eta$, a \textbf{Global Rebuild} is triggered: all hash buckets are cleared, the PCA projection $W_{\text{proj}}$ and mean $\mu$ are recomputed from a fresh encoding of the entire replay buffer, and all transitions are re-hashed. This ensures the hash structure stays aligned with the evolving representation, subject to a cooldown period to amortize cost.
+\subsection{Retrieval-Augmented Actor-Critic Learning}
+\label{subsec:flash_learning}
+The retrieved groups provide contexts for imagined trajectories used in Actor-Critic training.
 
-
-\paragraph{Stage 4: In-batch Injection with Inverse-Group Weighting.}
+\paragraph{Context Extraction and Batch Composition.}
 For each retrieved group $\mathcal{N}_a$, we extract the preceding $L$-step context window of observations and actions from the replay buffer (validating that no episode termination occurs within the window). Let $N_{\text{ret}} = \sum_{a} |\mathcal{N}_a|$ denote the total number of retrieved contexts (including both anchors and their matched neighbors). These are concatenated with randomly-sampled contexts to form the imagination batch:
 \begin{equation}
 \mathcal{D}_{\text{imagine}} = \underbrace{\{(o_{t-L:t},\, a_{t-L:t})\}_{i=1}^{N_\text{rand}}}_{\text{random samples}} \;\cup\; \underbrace{\bigcup_{a \in \text{popped}} \{(o^{(j)}_{t-L:t},\, a^{(j)}_{t-L:t})\}_{j \in \mathcal{N}_a}}_{\text{retrieved contexts (anchors + neighbors)}},
@@ -176,6 +178,7 @@ For each retrieved group $\mathcal{N}_a$, we extract the preceding $L$-step cont
 \end{equation}
 where $N_{\text{rand}} = \max\big(0,\, N_{\text{total}} - N_{\text{ret}}\big)$, and $N_{\text{total}}$ is the base imagination batch size. We choose $M$ and $n$ such that $Mn \leq N_{\text{total}}$. Since each of the at most $M$ anchor groups contains at most $n$ contexts (including the anchor), $N_{\text{ret}} \leq Mn \leq N_{\text{total}}$. Consequently, $N_{\text{rand}} + N_{\text{ret}} = N_{\text{total}}$, so substituting retrieved contexts for random samples strictly preserves the physical batch size.
 
+\paragraph{Group Weighting.}
 To prevent any single anchor group from dominating the gradient, each member within group $\mathcal{N}_a$ receives an \textbf{inverse-group weight} $w_j = 1/|\mathcal{N}_a|$, while every random sample receives $w=1$. Consequently, the total effective weight sum across the augmented batch becomes:
 \begin{equation}
 W_{\text{sum}} = N_{\text{rand}} + M_{\text{valid}} < N_{\text{total}},
@@ -189,7 +192,7 @@ All Actor-Critic losses---policy, value, and entropy---are normalized by this re
 \label{eq:weighted_loss}
 \end{equation}
 
-\textbf{Effect of Batch Weighting:} Inverse-group weighting controls the relative contribution of retrieved groups and random contexts to the existing Actor-Critic losses. We evaluate this design empirically through comparisons with a variant that preserves the original total weight and a baseline with a reduced random batch (Appendix~\ref{sec:appendix_ablation_weight}).
+We evaluate this adjustment through comparisons with a variant that preserves the original total weight and a baseline with a reduced random batch (Appendix~\ref{sec:appendix_ablation_weight}).
 
 \paragraph{Warmup Curriculum.}
 In our experiments, we set the retrieval warmup to $T_{\text{warm}} = T/2 = 50,000$ environment steps, half of the total training budget of $T = 100,000$ environment steps. This count includes the initial replay-buffer collection phase. During warmup, once the replay buffer is ready, world-model and Actor-Critic training proceed on their usual schedules, and the EMA statistics accumulate, but no anchors are registered and no retrieval occurs. Actor-Critic training uses randomly sampled contexts during this phase. This prevents noisy early-stage value estimates from corrupting the anchor selection process. In STORM, an initial Global Rebuild is performed at the last policy-training step before warmup ends to prepare the index for retrieval. Anchor registration and retrieval are activated for the second half of training ($t \geq T_{\text{warm}}$).
@@ -198,27 +201,27 @@ In our experiments, we set the retrieval warmup to $T_{\text{warm}} = T/2 = 50,0
 \caption{FLASH: Fast Latent Anchor Search with Hashing}
 \label{alg:flash}
 \begin{algorithmic}[1]
-\REQUIRE Base agent, replay buffer $\mathcal{R}$, FLASH parameters from Section~\ref{subsec:flash_method} with $Mn \leq N_{\text{total}}$
+\REQUIRE Base agent, replay buffer $\mathcal{R}$, FLASH parameters from Section~\ref{sec:method} with $Mn \leq N_{\text{total}}$
 \REQUIRE Initial collection steps $T_{\text{init}}$ sufficient for replay sampling, total steps $T$, retrieval warmup $T_{\text{warm}} = T/2$
 \STATE Initialize hash buckets, anchor queue $\mathcal{A}$, and EMA statistics
 \FOR{$t = 0,\ldots,T_{\text{init}}-1$}
     \STATE Collect a transition with a uniformly random action into $\mathcal{R}$
 \ENDFOR
 \FOR{$t = T_{\text{init}},\ldots,T-1$}
-    \STATE Collect a transition into $\mathcal{R}$ and update the hash index (\textbf{Stage 1})
+    \STATE Collect a transition into $\mathcal{R}$ and update the hash index (Section~\ref{subsec:flash_memory})
     \STATE Sample a replay batch and update the world model
-    \STATE Compute \textit{surprise} $S_u$ with existing EMA, then update EMA (\textbf{Stage 2})
+    \STATE Compute \textit{surprise} $S_u$ with existing EMA, then update EMA (Eq.~\eqref{eq:surprise})
     \IF{$t \geq T_{\text{warm}}$}
         \STATE Register an anchor for each sequence with $\max_{u \in \text{seq}} S_u > \tau_z$
     \ENDIF
     \STATE Initialize retrieved groups to $\emptyset$
     \IF{$t \geq T_{\text{warm}}$}
-        \STATE Pop up to $M$ anchors; retrieve and re-verify up to $n$ contexts per group (\textbf{Stage 3})
+        \STATE Pop up to $M$ anchors; retrieve and re-verify up to $n$ contexts per group (Section~\ref{subsec:flash_retrieval})
     \ENDIF
-    \STATE Fill the remaining batch slots with random contexts (\textbf{Stage 4}, Eq.~\eqref{eq:batch_compose})
+    \STATE Fill the remaining batch slots with random contexts (Eq.~\eqref{eq:batch_compose})
     \STATE Generate imagined trajectories from the composed contexts
-    \STATE Apply Global Rebuild if due (\textbf{Stage 3} and Warmup Curriculum)
-    \STATE Update Actor-Critic with group-weighted losses (\textbf{Stage 4}, Eq.~\eqref{eq:weighted_loss})
+    \STATE Apply Global Rebuild if due (Section~\ref{subsec:flash_memory}; warmup in Section~\ref{subsec:flash_learning})
+    \STATE Update Actor-Critic with group-weighted losses (Eq.~\eqref{eq:weighted_loss})
 \ENDFOR
 \end{algorithmic}
 \end{algorithm}
@@ -302,20 +305,19 @@ We examine how successful training experiences translate into evaluation perform
 \centering
 
 % (a) Learning dynamics of one selected training run per method
-\begin{minipage}{\textwidth}
+\begin{minipage}[t]{0.66\textwidth}
+  \vspace{0pt}
   \centering
   \includegraphics[width=0.48\linewidth]{experiment/fig_episode_success.pdf} \hfill
   \includegraphics[width=0.48\linewidth]{experiment/fig_eval_success.pdf} \\ \vspace{0.2cm}
-  \textbf{(a) Learning Dynamics of the Selected Training Runs}
-\end{minipage}
-
-\vspace{0.6cm}
-
+  {\small\textbf{(a) Learning Dynamics of the Selected Training Runs}}
+\end{minipage}\hfill%
 % (b) Episode returns from 20 evaluation seeds per final checkpoint
-\begin{minipage}{\textwidth}
+\begin{minipage}[t]{0.32\textwidth}
+  \vspace{0pt}
   \centering
-  \includegraphics[width=0.7\linewidth]{experiment/fig_distribution.pdf} \\ \vspace{0.2cm}
-  \textbf{(b) Evaluation Episode Returns at 100k (20 Evaluation Seeds)}
+  \includegraphics[width=\linewidth]{experiment/fig_distribution.pdf} \\ \vspace{0.2cm}
+  {\small\textbf{(b) Evaluation Episode Returns at 100k (20 Evaluation Seeds)}}
 \end{minipage}
 
 \caption{Amplification of Successful Exploration. \textbf{(a)} Training episode scores (left) and evaluation scores (right) for one selected training run per method. Both runs encounter high-return episodes during training. The early divergence during the first half of training (retrieval warmup) is discussed in Appendix~\ref{sec:appendix_rng_divergence}. \textbf{(b)} Episode return distributions obtained by evaluating each selected run's fixed 100k-step checkpoint with 20 evaluation seeds. Each dot is the return of one evaluation episode. The distributions describe variation across evaluation episodes for these checkpoints; each method contributes a single training run. FLASH exhibits a higher median and upper quartile, while the minimum episode returns are similar.}
@@ -368,7 +370,7 @@ In this paper, we critique the recent trend of obsessing over visual representat
 
 \section{Implementation Details: Early Trajectory Divergence during Warmup}
 \label{sec:appendix_rng_divergence}
-As observed in our learning curves (e.g., Figure \ref{fig:exploitation_amplifier}), the performance of the Baseline and FLASH diverge even during retrieval warmup ($t < T_{\text{warm}} = 50,000$), which occupies the first half of the 100,000-step training budget, despite FLASH not actively retrieving memories during this period. This divergence is an expected artifact of the implementation. During the warmup phase, FLASH actively calculates the temporal-difference (TD) errors and value differences to accumulate the Exponential Moving Average (EMA) statistics (as detailed in Section \ref{subsec:flash_method}). Evaluating these metrics involves network forward passes and sampling operations that consume the global Random Number Generator (RNG) state. Consequently, the sequence of random numbers used for subsequent action sampling shifts, leading to naturally diverging environment trajectories compared to the Baseline, which does not compute these statistics. We emphasize that this early divergence is purely due to RNG state consumption and not any premature retrieval intervention by FLASH.
+As observed in our learning curves (e.g., Figure \ref{fig:exploitation_amplifier}), the performance of the Baseline and FLASH diverge even during retrieval warmup ($t < T_{\text{warm}} = 50,000$), which occupies the first half of the 100,000-step training budget, despite FLASH not actively retrieving memories during this period. This divergence is an expected artifact of the implementation. During the warmup phase, FLASH actively calculates the temporal-difference (TD) errors and value differences to accumulate the Exponential Moving Average (EMA) statistics (as detailed in Section~\ref{subsec:flash_retrieval}). Evaluating these metrics involves network forward passes and sampling operations that consume the global Random Number Generator (RNG) state. Consequently, the sequence of random numbers used for subsequent action sampling shifts, leading to naturally diverging environment trajectories compared to the Baseline, which does not compute these statistics. We emphasize that this early divergence is purely due to RNG state consumption and not any premature retrieval intervention by FLASH.
 
 \section{Implementation Details: Causal Offset in Anchor Registration}
 \label{sec:appendix_causal_anchor}
@@ -403,7 +405,7 @@ Additionally, this hardware-level asynchrony provides a strong justification for
 
 \section{Ablation on Batch Weight Reduction}
 \label{sec:appendix_ablation_weight}
-As detailed in Section~\ref{subsec:flash_method}, our method computes the number of random samples as $N_{\text{rand}} = \max(0, N_{\text{total}} - N_{\text{ret}})$. When combined with inverse-group weighting, this effectively reduces the total weight of the batch $W_{\text{sum}}$ to a value strictly smaller than the base batch size $N_{\text{total}}$.
+As detailed in Section~\ref{subsec:flash_learning}, our method computes the number of random samples as $N_{\text{rand}} = \max(0, N_{\text{total}} - N_{\text{ret}})$. When combined with inverse-group weighting, this effectively reduces the total weight of the batch $W_{\text{sum}}$ to a value strictly smaller than the base batch size $N_{\text{total}}$.
 
 To validate this design, we evaluated a variant where we only subtracted the number of valid anchors instead of the total retrieved contexts: $N_{\text{rand}} = \max(0, N_{\text{total}} - M_{\text{valid}})$. This alternative perfectly preserves the original total batch weight of $N_{\text{total}}$. However, we observed a significant performance degradation (\todo{자세한 성능 하락 언급}). We hypothesize that because FLASH provides highly focused, directional signals, it substantially accelerates the Actor-Critic optimization. Maintaining the full batch weight causes the Actor-Critic to learn too rapidly, disrupting the synchronization with the World Model's representation learning.
 
@@ -627,5 +629,27 @@ Here, we replace the temporal value difference ($|V(s_t) - V(s_{t-1})|$) in the 
 In this ablation, we substitute our multiplicative trigger condition with an additive linear combination, similar to prior works like HVPER: $\lambda \cdot \text{TD-error} + (1-\lambda) \cdot \text{Value Difference}$. The additive approach is prone to false positives; a massive TD-error caused by environmental noise can trigger an anchor even if there is zero value difference. Our multiplicative formulation effectively acts as a logical AND gate, suppressing these noisy false positives and ensuring that only truly pivotal learning moments are retrieved.
 
 \todo{Include comprehensive tables and graphs detailing the specific quantitative performance metrics across the evaluated environments for these three ablations.}
+
+\section{Extended Related Work}
+\label{sec:appendix_related_work}
+This section expands the background and comparisons summarized in Section~\ref{sec:related}.
+
+\subsection{Latent World Models and Imagination-Based Learning}
+Latent world models encode visual observations into compact states and learn dynamics that generate imagined trajectories for policy and value learning. Dreamer \citep{hafner2019dream} and DreamerV2 \citep{hafner2020mastering} established Actor-Critic learning in latent imagination. STORM \citep{zhang2023storm}, the primary base agent in our experiments, combines stochastic latent states with Transformer-based dynamics. DRAMA \citep{wang2025drama} explores Mamba-based dynamics to improve sample and parameter efficiency. FLASH operates within this setting by augmenting the historical contexts used to initialize imagined trajectories, while retaining the underlying encoder and world-model architectures.
+
+\subsection{Representation Learning and Visual Fidelity}
+Learning compact representations that retain information relevant for control is a central challenge in visual RL \citep{hafner2019learning}. Several methods address this through representation-learning objectives. CURL \citep{laskin2020curl} introduces contrastive unsupervised learning, while SPR \citep{schwarzer2020data} uses temporal predictive consistency to learn invariant representations. ATC \citep{stooke2021decoupling} decouples representation learning from policy optimization. DreamerPro \citep{deng2022dreamerpro} adopts reconstruction-free, prototypical representations. These approaches motivate examining both what information a representation retains and how downstream learning uses it.
+
+DIAMOND \citep{alonso2024diffusion} replaces the discrete latent bottleneck with a diffusion-based world model to preserve complex visual details. This approach emphasizes visual fidelity, with additional computation associated with generative modeling. FLASH explores a complementary intervention: targeted reuse of experience during Actor-Critic training with the existing lightweight encoder. It does not require replacing the representation-learning objective or introducing a heavier generative model.
+
+\subsection{Episodic Memory for Value Estimation and Control}
+Model-Free Episodic Control (MFEC; \citealp{blundell2016model}) stores the highest observed returns for state-action pairs and uses nearest-neighbor lookup to estimate values for unseen states. Neural Episodic Control (NEC; \citealp{pritzel2017neural}) combines learned state embeddings with a differentiable neural dictionary for rapid value estimation. EVA \citep{hansen2018fast} retrieves similar historical experiences to adjust and augment parametric value estimates. ERLAM \citep{zhu2020episodic} structures episodic memory through associative graphs for trajectory propagation, while subsequent work incorporates state abstraction \citep{li2023neural}.
+
+The distinction relevant to FLASH is how retrieved experience enters learning. Rather than using retrieved returns directly as a component of value estimation, FLASH searches hash buckets for structurally similar contexts around selected anchors. These contexts enter the same imagination batch and support training with the existing Actor-Critic objectives. Hash indexing also avoids the need for a full nearest-neighbor search or an explicit associative graph.
+
+\subsection{Priority Signals and Anchor Selection}
+Prioritized Experience Replay uses TD-error to prioritize transitions \citep{schaul2015prioritized}. Other approaches incorporate value-related signals \citep{cao2019high} or model-based curiosity \citep{kauvar2023curious}. Sequence-level methods extend prioritization beyond individual transitions \citep{karimpanal2018experience, brittain2019prioritized}, and actor-critic-specific methods tailor replay priorities to the learning objectives \citep{saglam2023actor}. Prioritized Sweeping \citep{moore1993prioritized} uses changes in value estimates to schedule backups.
+
+FLASH's anchor score differs in two design choices. First, it uses the signed temporal difference between consecutive state values, $\Delta V_t = V(s_t)-V(s_{t-1})$, rather than absolute state value. This differs from the before-and-after-update value change used in Prioritized Sweeping: the two signals compare different states along a trajectory and different estimates of a state, respectively. Second, FLASH combines normalized TD-error and temporal value difference multiplicatively through ReLU and softplus, rather than the additive combination discussed for HVPER \citep{cao2019high}. The ReLU factor requires above-average TD-error for a positive score, while the softplus factor modulates the score according to value change. The exact formulation is given in Section~\ref{subsec:flash_retrieval}. Anchor selection is followed by retrieval of related contexts, whose contribution beyond anchor injection alone is evaluated in Appendix~\ref{sec:appendix_ablation_studies}.
 
 \end{document}
