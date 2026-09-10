@@ -225,7 +225,7 @@ In our experiments, we set the retrieval warmup to $T_{\text{warm}} = T/2 = 50,0
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\textwidth]{pipeline.png}
+\includegraphics[width=\textwidth]{pipeline.pdf}
 \caption{Overview of the FLASH pipeline. \textbf{(Left)} During environment interaction, each observation is processed by the encoder and projector to generate a discrete binary hash, which is registered in a hash bucket. \textbf{(Right)} Triggered anchors and target states retrieve structurally similar frames with matching hashes from the hash bucket. These grouped experiences serve as the basis for imagination, naturally clustering structurally aliased past experiences together.}
 \label{fig:flash_pipeline}
 \end{figure}
@@ -245,7 +245,7 @@ This mechanism effectively explains the discrepancy in our empirical results acr
 \label{sec:experiments}
 
 \subsection{Experimental Setup}
-We evaluate our method across all 26 games of the Atari 100k benchmark.
+We evaluate our method across all 26 games of the Atari 100k benchmark. \todo{다섯 시드로 각각 학습을 수행하여, 각 학습 마다 20개의 시드에서 평가를 함. 이 100개의 결과를 평균내어 특정 모델의 한 게임에 대한 성능을 구함}
 
 \subsection{Main Performance}
 Table~\ref{tab:main_performance} presents the comprehensive Atari 100k results. 
