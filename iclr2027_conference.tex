@@ -76,10 +76,10 @@ MFEC, NEC, and EVA use episodic experience to inform value estimates \citep{blun
 \textbf{Prioritized Experience Replay.}
 Experience selection has used TD-error \citep{schaul2015prioritized}, value signals \citep{cao2019high}, curiosity \citep{kauvar2023curious}, sequence priorities \citep{karimpanal2018experience, brittain2019prioritized}, and actor-critic-specific criteria \citep{saglam2023actor}. Prioritized Sweeping schedules backups using changes in value estimates \citep{moore1993prioritized}. FLASH selects anchors using a multiplicative score combining TD-error and signed temporal value difference, then retrieves structurally similar contexts for joint training. Appendix~\ref{sec:appendix_related_work} provides further background and comparisons.
 
-\section{Motivation: Re-evaluating Representation and Optimization Bottlenecks}
+\section{Problem Analysis and Motivation}
 \label{sec:representation}
 
-\subsection{Poor Reconstruction Does Not Necessarily Imply Information Loss}
+\subsection{Reconstruction and Information Loss}
 Poor visual reconstruction raises questions about the information available in a model state, but image blurriness alone does not establish information loss. In this section, we investigate whether selected task-relevant variables remain despite poor reconstruction.
 
 As a motivating observation, we note the \textit{temporal persistence of objects} during the \textbf{open-loop imagination phase} in models like DreamerV3 and Drama \citep{hafner2023mastering, wang2025drama}. During this phase, the model predicts future states solely based on its internal transition dynamics, without access to real observations. For instance, in Figure~\ref{fig:temporal_persistence}, the highlighted fish appears less blurry at $t$, more blurry at $t+1$, and less blurry again at $t+2$. This observation suggests that decoded image quality alone is insufficient to assess predictive state information. It does not establish complete information preservation and motivates the direct probing experiments below.
@@ -105,7 +105,7 @@ As a motivating observation, we note the \textit{temporal persistence of objects
 \label{fig:temporal_persistence}
 \end{figure}
 
-\subsection{Probing the Latent Space: Information Loss vs. Aliasing}
+\subsection{Probing the Latent Space}
 \label{subsec:probing_latent}
 To formally investigate whether standard lightweight encoders successfully capture functionally critical elements, we conducted extensive probing experiments on the Seaquest environment. First, using images with perfectly identical backgrounds varying only the target elements, we observed that the pairwise cosine similarities of latent states encoding different diver counts and positions were strictly less than 1.0 (dropping to $0.86$ and $0.63$, respectively). This suggests sensitivity to changes in these target regions, motivating a direct test of whether a supervised probe can predict the corresponding task variables from latent states.
 
@@ -129,7 +129,6 @@ FLASH maintains a lightweight episodic memory indexed by Locality-Sensitive Hash
 \subsection{Hash-Indexed Episodic Memory}
 \label{subsec:flash_memory}
 
-\paragraph{Hashing and Indexing.}
 At every environment step, the world model observation encoder and posterior head, jointly denoted by $f_\theta$, map a single observation $o_t$ to a flattened posterior categorical probability vector $z_t = f_\theta(o_t) \in [0,1]^{d}$, where $d = K \times C$ with $K$ categorical variables each of $C$ classes. Specifically, STORM converts posterior logits to probabilities via softmax and applies \textit{unimix} (1\% uniform mixing), yielding $z_t = \operatorname{vec}(0.99\,\operatorname{softmax}(\ell_t) + 0.01/C)$, where $\ell_t \in \mathbb{R}^{K \times C}$ contains the raw posterior logits, softmax is applied over the $C$ classes of each variable, and $K=C=32$. Thus, hashing uses the resulting probabilities, rather than logits or sampled one-hot latent states, and excludes the world model's temporal hidden state. The same probability representation is used for insertion, re-verification, and Global Rebuild. We apply an LSH function $h: \mathbb{R}^d \to \{0,1,\ldots,2^B{-}1\}$ to produce a discrete hash key:
 \begin{equation}
 h(z_t) = \sum_{i=1}^{B} \mathbf{1}\!\left[\left(W_{\text{proj}}^\top (z_t - \mu)\right)_i > 0\right] \cdot 2^{i-1},
@@ -145,7 +144,6 @@ As the encoder evolves, stored hash keys can become stale. We monitor the averag
 \subsection{Surprise-Guided Retrieval}
 \label{subsec:flash_retrieval}
 
-\paragraph{Anchor Selection.}
 TD-error magnitude is commonly used as a proxy for how surprising a transition is in prioritized replay \citep{schaul2015prioritized}. In FLASH, \textit{surprise} denotes an anchor-selection score that combines TD-error magnitude with the signed temporal value difference, rather than TD-error magnitude alone. During each world model training step, given a batch of sampled trajectories with value estimates $V(s_t)$ from the critic, we compute:
 \begin{align}
 \delta_t^{\text{TD}} &= \left| r_t + \gamma \, V(s_{t+1})(1 - d_t) - V(s_t) \right|, \label{eq:td_error} \\
@@ -170,7 +168,6 @@ At each imagination step (where the agent generates imagined trajectories for po
 \label{subsec:flash_learning}
 The retrieved groups provide contexts for imagined trajectories used in Actor-Critic training.
 
-\paragraph{Context Extraction and Batch Composition.}
 For each retrieved group $\mathcal{N}_a$, we extract the preceding $L$-step context window of observations and actions from the replay buffer (validating that no episode termination occurs within the window). Let $N_{\text{ret}} = \sum_{a} |\mathcal{N}_a|$ denote the total number of retrieved contexts (including both anchors and their matched neighbors). These are concatenated with randomly-sampled contexts to form the imagination batch:
 \begin{equation}
 \mathcal{D}_{\text{imagine}} = \underbrace{\{(o_{t-L:t},\, a_{t-L:t})\}_{i=1}^{N_\text{rand}}}_{\text{random samples}} \;\cup\; \underbrace{\bigcup_{a \in \text{popped}} \{(o^{(j)}_{t-L:t},\, a^{(j)}_{t-L:t})\}_{j \in \mathcal{N}_a}}_{\text{retrieved contexts (anchors + neighbors)}},
@@ -194,7 +191,7 @@ All Actor-Critic losses---policy, value, and entropy---are normalized by this re
 
 We evaluate this adjustment through comparisons with a variant that preserves the original total weight and a baseline with a reduced random batch (Appendix~\ref{sec:appendix_ablation_weight}).
 
-\paragraph{Warmup Curriculum.}
+\paragraph{Retrieval Warmup.}
 In our experiments, we set the retrieval warmup to $T_{\text{warm}} = T/2 = 50,000$ environment steps, half of the total training budget of $T = 100,000$ environment steps. This count includes the initial replay-buffer collection phase. During warmup, once the replay buffer is ready, world-model and Actor-Critic training proceed on their usual schedules, and the EMA statistics accumulate, but no anchors are registered and no retrieval occurs. Actor-Critic training uses randomly sampled contexts during this phase. This prevents noisy early-stage value estimates from corrupting the anchor selection process. In STORM, an initial Global Rebuild is performed at the last policy-training step before warmup ends to prepare the index for retrieval. Anchor registration and retrieval are activated for the second half of training ($t \geq T_{\text{warm}}$).
 
 \begin{algorithm}[t]
@@ -244,8 +241,9 @@ We evaluate our method across all 26 games of the Atari 100k benchmark. \todo{ë‹
 Table~\ref{tab:main_performance} presents the comprehensive Atari 100k results. 
 
 
-\begin{table}[h]
+\begin{table}[!t]
 \centering
+\caption{Atari 100k performance. The ``+ours'' columns denote agents augmented with FLASH. Dashes indicate results not yet available.}
 \label{tab:main_performance}
 \resizebox{\textwidth}{!}{
 \begin{tabular}{lrrrrrrrr}
@@ -301,7 +299,7 @@ Overall, the results show that the benefit of FLASH varies across environments.
 
 We examine how successful training experiences translate into evaluation performance using one training run per method. For each method, we evaluate the final checkpoint at 100k environment steps with 20 evaluation seeds, running one episode per evaluation seed. Each point in the resulting distribution is therefore an individual evaluation episode return from a fixed checkpoint.
 
-\begin{figure}[h]
+\begin{figure}[!t]
 \centering
 
 % (a) Learning dynamics of one selected training run per method
@@ -337,7 +335,7 @@ Since the latent dimension ($d$), hash bits ($B$), and other hyperparameters (e.
     \item \textbf{Anchor Triggering:} $\mathcal{O}(N_{\text{batch}} \cdot L_{\text{seq}}) \approx \mathcal{O}(1)$. Lightweight Z-score tracking requires no additional neural network passes.
 \end{itemize}
 
-\begin{table}[h]
+\begin{table}[!t]
 \centering
 \caption{\todo{Directly create a table here comparing the Frames Per Second (FPS) or total Training Time between the baseline model and our proposed method (+ours).}}
 \label{tab:efficiency}
@@ -385,7 +383,7 @@ Furthermore, this remaining error is largely an irreducible artifact of the Atar
 
 Additionally, this hardware-level asynchrony provides a strong justification for the $92.4\%$ presence prediction accuracy. The Atari RAM strictly registers a diver as "present" the exact moment its coordinate enters the screen boundary, even though visually only an almost imperceptible fraction of the sprite is drawn at the extreme left or right edges. Conversely, when the submarine collects a diver, the diver's entity is immediately wiped from the RAM state; yet, its visual sprite typically persists on the screen for at least one additional frame, heavily overlapping with the submarine before fully disappearing. These edge-case boundary entering and collision events create a persistent temporal mismatch between what is rendered and what the RAM dictates, accounting for the remaining gap in presence accuracy.
 
-\begin{figure}[h]
+\begin{figure}[!t]
     \centering
     \begin{minipage}{0.48\textwidth}
         \centering
@@ -419,7 +417,7 @@ To examine whether the observed value-function improvements are accompanied by c
 
 As shown in Table \ref{tab:per_class_noise_flash}, the FLASH encoder exhibits nearly identical behavior to the Baseline encoder. Under clean conditions, a probe classifies the igloo construction stage (0--16) from latent states with 99.1\% accuracy. However, upon injecting background noise, the probing accuracy catastrophically drops to 27.2\%, showing similar sensitivity to background corruption as the Baseline (which dropped to 27.7\%). These results suggest that the value-function improvements (Section~\ref{subsec:robustness_value}) need not be accompanied by improved encoder probing robustness, consistent with better downstream utilization of the available representations.
 
-\begin{table}[h]
+\begin{table}[!t]
     \centering
     \caption{Per-class classification accuracy for igloo construction stages (0--16) in Frostbite using the FLASH encoder. The results mirror the Baseline, indicating that the encoder--probe pipeline remains sensitive to background corruption.}
     \label{tab:per_class_noise_flash}
@@ -454,7 +452,7 @@ As shown in Table \ref{tab:per_class_noise_flash}, the FLASH encoder exhibits ne
 \label{sec:appendix_value_robustness}
 This section provides the complete quantitative results for the value function robustness evaluation discussed in Section~\ref{subsec:robustness_value}. We evaluate the consistency of the predicted value against the 17 sequential stages of igloo construction under frozen background contexts.
 
-\begin{table}[h]
+\begin{table}[!t]
     \centering
     \caption{Correlation coefficients of predicted state values against igloo construction stages (0--16). Metric 1 measures the average correlation across individual noisy sequences, demonstrating FLASH's superior resistance to spatial entanglement. Metric 2 measures the correlation of the globally averaged value profile.}
     \label{tab:value_metrics}
@@ -470,7 +468,7 @@ This section provides the complete quantitative results for the value function r
     \end{tabular}
 \end{table}
 
-\begin{table}[h]
+\begin{table}[!t]
     \centering
     \caption{Global Average Value by Igloo Stage (averaged across 17,496 evaluation frames). The Baseline profile increases monotonically, whereas FLASH peaks at Stage 11 and declines as the igloo nears completion.}
     \label{tab:global_average_values}
@@ -508,7 +506,7 @@ This section provides the comprehensive experimental setup and extended results 
 \subsection{Preliminary Observation: The Cosine Similarity Clue}
 To formally investigate whether the encoder successfully captures functionally critical, yet small and static elements, we designed a motivating experiment. Instead of a single comparison, we generated two comprehensive sets of images by fixing the background to be perfectly identical and replacing only the diver regions to vary the target elements: one varying the number of collected divers at the bottom area (from 0 to 6), and another varying the position of a single diver on the sea area. We then extracted their latent states and computed the pairwise cosine similarities.
 
-\begin{figure}[h]
+\begin{figure}[!t]
 \centering
 \begin{minipage}{0.48\textwidth}
   \centering
@@ -543,7 +541,7 @@ DIAMOND \citep{alonso2024diffusion} notes that compression into discrete latent 
 
 To assess sensitivity to changes outside the target region, we evaluated the probing MLP on these noise-injected images and observed a substantial accuracy drop. As detailed in Table~\ref{tab:per_class_noise}, in Seaquest, accuracy dropped from $99.6\%$ (clean) to $68.1\%$ (effectively random chance, as it converged to predicting the majority class). We observed an even more dramatic collapse in Frostbite (Table~\ref{tab:per_class_noise_frostbite}), where the accuracy for predicting the igloo stage fell from a pristine $99.2\%$ down to $27.7\%$ upon background noise injection. These results show that the encoder--probe pipeline is sensitive to background corruption, consistent with spatial entanglement. However, because extreme noise introduces a substantial distribution shift, the experiment does not distinguish encoder sensitivity from limitations in probe generalization, nor establish that spatial entanglement is the sole explanation.
 
-\begin{table}[h]
+\begin{table}[!t]
     \centering
     \caption{Per-class classification accuracy for bottom diver counting in Seaquest. The clean setting uses the uncorrupted $64 \times 64$ observation, while the noisy setting injects uniform random noise everywhere except the tight bounding box containing the divers. The drop in minority class accuracy indicates sensitivity of the encoder--probe pipeline to background corruption.}
     \label{tab:per_class_noise}
@@ -564,7 +562,7 @@ To assess sensitivity to changes outside the target region, we evaluated the pro
     \end{tabular}
 \end{table}
 
-\begin{table}[h]
+\begin{table}[!t]
     \centering
     \caption{Per-class classification accuracy for igloo construction stages (0--16) in Frostbite. Similar to Seaquest, injecting background noise outside the igloo bounding box severely degrades the probing accuracy, indicating sensitivity of the encoder--probe pipeline to changes outside the target region.}
     \label{tab:per_class_noise_frostbite}
