@@ -36,7 +36,7 @@
 \maketitle
 
 \begin{abstract}
-Recent advancements in Reinforcement Learning (RL) have heavily adopted Diffusion-based models to improve visual representations, but they suffer from prohibitive computational costs. In this paper, we investigate whether this heavy generative approach is the only solution. While prior work assumes that compact visual representations discard fine-grained details, we revisit this assumption. Our probing experiments show that lightweight encoders can retain substantial task-relevant information despite poor visual reconstruction. These findings suggest that poor reconstruction alone does not establish the absence of task-relevant information, motivating interventions that improve how downstream Actor-Critic learners use the available representations. Building on this, we demonstrate that augmenting the Actor-Critic optimization process is a highly effective way to distinguish aliased states. To this end, we propose FLASH (Fast Latent Anchor Search with Hashing), an efficient retrieval module that implicitly supports Actor-Critic learning by selecting anchors based on a surprise score and augmenting training batches with these anchors and structurally similar past experiences. By improving downstream discrimination between aliased states, FLASH acts as a versatile plug-and-play module that improves the overall performance of the evaluated baselines without altering their underlying encoders, confirming that heavy generative models are not strictly necessary and acting as a powerful exploitation amplifier with negligible computational overhead.
+Recent advancements in Reinforcement Learning (RL) have heavily adopted Diffusion-based models to improve visual representations, but they suffer from prohibitive computational costs. In this paper, we investigate whether this heavy generative approach is the only solution. While prior work assumes that compact visual representations discard fine-grained details, we revisit this assumption. Our probing experiments show that lightweight encoders can retain substantial task-relevant information despite poor visual reconstruction. These findings suggest that poor reconstruction alone does not establish the absence of task-relevant information, motivating interventions that improve how downstream Actor-Critic learners use the available representations. Building on this, we demonstrate that augmenting the Actor-Critic optimization process is a highly effective way to distinguish aliased states. To this end, we propose FLASH (Fast Latent Anchor Search with Hashing), an efficient retrieval module that implicitly supports Actor-Critic learning by selecting anchors based on a surprise score and augmenting training batches with these anchors and structurally similar past experiences. By improving downstream discrimination between aliased states, FLASH acts as a versatile plug-and-play module that improves the overall performance of the evaluated baselines without altering their underlying encoders, confirming that heavy generative models are not strictly necessary and acting as a powerful exploitation amplifier.
 \end{abstract}
 
 \section{Introduction}
@@ -318,29 +318,46 @@ We examine how successful training experiences translate into evaluation perform
   {\small\textbf{(b) Evaluation Episode Returns at 100k (20 Evaluation Seeds)}}
 \end{minipage}
 
-\caption{Amplification of Successful Exploration. \textbf{(a)} Training episode scores (left) and evaluation scores (right) for one selected training run per method. Both runs encounter high-return episodes during training. The early divergence during the first half of training (retrieval warmup) is discussed in Appendix~\ref{sec:appendix_rng_divergence}. \textbf{(b)} Episode return distributions obtained by evaluating each selected run's fixed 100k-step checkpoint with 20 evaluation seeds. Each dot is the return of one evaluation episode. The distributions describe variation across evaluation episodes for these checkpoints; each method contributes a single training run. FLASH exhibits a higher median and upper quartile, while the minimum episode returns are similar.}
+\caption{Amplification of Successful Exploration. \textbf{(a)} Training episode scores (left) and evaluation scores (right) for one selected training run per method. \textbf{(b)} Evaluation return distributions for the corresponding fixed 100k-step checkpoints across 20 evaluation seeds; each dot represents one episode.}
 \label{fig:exploitation_amplifier}
 \end{figure}
 
-Figure~\ref{fig:exploitation_amplifier}(a) shows that both selected training runs attain similarly high episode returns, while FLASH achieves higher evaluation scores in the later stages of training. Panel (b) further shows that the final FLASH checkpoint yields higher median and upper-quartile episode returns across evaluation seeds. Together, these observations are consistent with more effective use of successful training experiences in the illustrated runs. The low-return points in panel (b) are individual evaluation outcomes of these trained checkpoints. Training runs that remain at low returns throughout learning constitute a separate failure to discover successful behavior; in our observations, the proportion of such training runs is unchanged by FLASH. The exploitation benefit examined here concerns evaluation performance after successful experiences have been encountered during training.
+Figure~\ref{fig:exploitation_amplifier}(a) shows that both selected training runs attain similarly high episode returns, while FLASH achieves higher evaluation scores in the later stages of training. The early divergence during the first half of training (retrieval warmup) is discussed in Appendix~\ref{sec:appendix_rng_divergence}. Panel (b) further shows that the final FLASH checkpoint yields higher median and upper-quartile episode returns across evaluation seeds. Together, these observations are consistent with more effective use of successful training experiences in the illustrated runs. The low-return points in panel (b) are individual evaluation outcomes of these trained checkpoints. Training runs that remain at low returns throughout learning constitute a separate failure to discover successful behavior; in our observations, the proportion of such training runs is unchanged by FLASH. The exploitation benefit examined here concerns evaluation performance after successful experiences have been encountered during training.
 
 \subsection{Computational Analysis}
-Because FLASH focuses solely on optimizing the Actor-Critic training rather than modifying the heavy representation models, it adds practically zero computational burden to the base model. 
+FLASH retains the base model's encoder architecture while introducing additional computation for hash indexing, anchor selection, retrieval, and memory maintenance. We quantify its practical overhead using total wall-clock training time for STORM with and without FLASH over 100,000 environment steps.
 Since the latent dimension ($d$), hash bits ($B$), and other hyperparameters (e.g., context lengths, batch sizes) are strictly bounded constants, the algorithmic time complexity simplifies as follows:
 \begin{itemize}
     \item \textbf{Insertion per frame:} $\mathcal{O}(d \cdot B) \approx \mathcal{O}(1)$. The state encoding cost is completely absorbed by the world model's inherent forward pass.
-    \item \textbf{Global Rebuild:} $\mathcal{O}(N_{\text{buf}} d^2 + d^3 + N_{\text{buf}} d B) \approx \mathcal{O}(N_{\text{buf}})$. Scales linearly with buffer size $N_{\text{buf}}$. Triggered rarely via the lazy rebuild threshold, making its amortized cost negligibly small.
-    \item \textbf{Retrieval step:} $\mathcal{O}\big(M m n (|f_\theta| + d \cdot B) + M n L\big) \approx \mathcal{O}(1)$. Re-verification and extraction overhead is minimal and strictly bounded.
+    \item \textbf{Global Rebuild:} $\mathcal{O}(N_{\text{buf}} d^2 + d^3 + N_{\text{buf}} d B) \approx \mathcal{O}(N_{\text{buf}})$. Scales linearly with buffer size $N_{\text{buf}}$; its contribution to total training time depends on the number of rebuilds.
+    \item \textbf{Retrieval step:} $\mathcal{O}\big(M m n (|f_\theta| + d \cdot B) + M n L\big) \approx \mathcal{O}(1)$. Re-verification and extraction costs are bounded by the configured candidate count, group size, and context length.
     \item \textbf{Anchor Triggering:} $\mathcal{O}(N_{\text{batch}} \cdot L_{\text{seq}}) \approx \mathcal{O}(1)$. Lightweight Z-score tracking requires no additional neural network passes.
 \end{itemize}
 
+Table~\ref{tab:efficiency} reports the total training times on three GPUs. For each GPU, let $t_{\mathrm{base}}$ and $t_{\mathrm{FLASH}}$ denote the measured times for STORM and STORM + FLASH, respectively. The additional time is $\Delta t = t_{\mathrm{FLASH}} - t_{\mathrm{base}}$, and the relative training time overhead is $100 \times \Delta t / t_{\mathrm{base}}\%$. These measurements cover the full 100k-step training budget, including the retrieval warmup described in Section~\ref{subsec:flash_learning}.
+
+\todo{Specify the timed game(s), training seeds, number of runs and aggregation, timing boundaries (including whether evaluation and checkpointing are timed), and shared settings within each GPU comparison.}
+
 \begin{table}[!t]
 \centering
-\caption{\todo{Directly create a table here comparing the Frames Per Second (FPS) or total Training Time between the baseline model and our proposed method (+ours).}}
+\caption{Total wall-clock training time for STORM and STORM + FLASH over 100,000 environment steps on each GPU. Times and absolute increases are reported in minutes; relative overhead is computed against the STORM baseline on the same GPU. TODO entries will be replaced with measured times and the corresponding derived values.}
 \label{tab:efficiency}
+\small
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{@{}p{0.38\textwidth}rrrr@{}}
+\toprule
+GPU & \shortstack{STORM\\(min)} & \shortstack{STORM + FLASH\\(min)} & \shortstack{Extra time\\(min)} & \shortstack{Overhead\\(\%)} \\
+\midrule
+% Fill times in minutes; Extra time = FLASH - baseline; Overhead = 100 * Extra time / baseline.
+NVIDIA RTX A6000 & 297 & 319 & \todo{--} & \todo{--} \\
+NVIDIA RTX PRO 6000 Blackwell Server Edition & 159 & 170 & \todo{--} & \todo{--} \\
+NVIDIA GeForce RTX 3090 & 411 & 432 & \todo{--} & \todo{--} \\
+\bottomrule
+\end{tabular}
 \end{table}
 
-Table~\ref{tab:efficiency} shows the empirical FPS measurements. FLASH delivers performance gains while keeping the additional computational overhead practically near zero.
+For the measured STORM runs, FLASH increases total training time by \todo{A6000 overhead}\% on the NVIDIA RTX A6000, \todo{Blackwell overhead}\% on the NVIDIA RTX PRO 6000 Blackwell Server Edition, and \todo{RTX 3090 overhead}\% on the NVIDIA GeForce RTX 3090 (Table~\ref{tab:efficiency}).
 
 \subsection{Robustness of Value Function and Mitigation of Spatial Entanglement}
 \label{subsec:robustness_value}
@@ -358,7 +375,7 @@ To validate the core components of our approach, we conducted ablation studies t
 
 \section{Conclusion}
 \label{sec:conclusion}
-In this paper, we critique the recent trend of obsessing over visual representation quality in RL. Our probing experiments show that lightweight encoders can retain substantial task-relevant information despite poor visual reconstruction. This evidence motivates improving how downstream Actor-Critic learners use the available representations, alongside approaches that improve the representations themselves. To validate this alternative approach, we proposed FLASH, an efficient and low-overhead retrieval method designed as a plug-and-play module. By augmenting Actor-Critic training batches with structurally similar past experiences, FLASH implicitly supports downstream learning and improves the overall performance of the evaluated RL baselines while maintaining extreme computational efficiency.
+In this paper, we critique the recent trend of obsessing over visual representation quality in RL. Our probing experiments show that lightweight encoders can retain substantial task-relevant information despite poor visual reconstruction. This evidence motivates improving how downstream Actor-Critic learners use the available representations, alongside approaches that improve the representations themselves. To validate this alternative approach, we proposed FLASH, a retrieval method designed as a plug-and-play module. By augmenting Actor-Critic training batches with structurally similar past experiences, FLASH implicitly supports downstream learning and improves the overall performance of the evaluated RL baselines. Its measured training time overhead for STORM is reported across three GPUs in Table~\ref{tab:efficiency}.
 
 \bibliography{iclr2027_conference}
 \bibliographystyle{iclr2027_conference}
