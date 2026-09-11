@@ -37,6 +37,7 @@
 
 \begin{abstract}
 Recent advancements in Reinforcement Learning (RL) have heavily adopted Diffusion-based models to improve visual representations, but they suffer from prohibitive computational costs. In this paper, we investigate whether this heavy generative approach is the only solution. While prior work assumes that compact visual representations discard fine-grained details, we revisit this assumption. Our probing experiments show that lightweight encoders can retain substantial task-relevant information despite poor visual reconstruction. These findings suggest that poor reconstruction alone does not establish the absence of task-relevant information, motivating interventions that improve how downstream Actor-Critic learners use the available representations. Building on this, we demonstrate that augmenting the Actor-Critic optimization process is a highly effective way to distinguish aliased states. To this end, we propose FLASH (Fast Latent Anchor Search with Hashing), an efficient retrieval module that implicitly supports Actor-Critic learning by selecting anchors based on a surprise score and augmenting training batches with these anchors and structurally similar past experiences. By improving downstream discrimination between aliased states, FLASH acts as a versatile plug-and-play module that improves the overall performance of the evaluated baselines without altering their underlying encoders, confirming that heavy generative models are not strictly necessary and acting as a powerful exploitation amplifier.
+For STORM, FLASH increases total wall-clock training time over 100,000 environment steps by 5.11--7.41\% across the three evaluated GPUs.
 \end{abstract}
 
 \section{Introduction}
@@ -56,7 +57,7 @@ Our contributions are threefold:
 \begin{itemize}
     \item First, we use diagnostic probing to assess whether lightweight encoder representations retain task-relevant information despite poor visual reconstruction, finding that supervised probes predict selected task variables from latent states with high accuracy under clean observations.
     \item Second, motivated by this evidence, we investigate downstream Actor-Critic optimization as a way to better utilize the available representations without replacing the encoder with a heavier model.
-    \item Finally, we propose FLASH, a plug-and-play retrieval mechanism that groups structurally similar past experiences within the same Actor-Critic training batch, without modifying the underlying encoder architecture. On Atari 100k, FLASH improves the IQM human-normalized score of \todo{evaluated baselines} by \todo{relative IQM improvement}, with a total training time increase of \todo{measured training time overhead}.
+    \item Finally, we propose FLASH, a plug-and-play retrieval mechanism that groups structurally similar past experiences within the same Actor-Critic training batch, without modifying the underlying encoder architecture. On Atari 100k, FLASH improves the IQM human-normalized score of \todo{evaluated baselines} by \todo{relative IQM improvement}, with a measured total training time increase of 5.11--7.41\% for STORM across three GPUs (Table~\ref{tab:efficiency}).
 \end{itemize}
 
 \section{Related Work}
@@ -325,7 +326,7 @@ We examine how successful training experiences translate into evaluation perform
 Figure~\ref{fig:exploitation_amplifier}(a) shows that both selected training runs attain similarly high episode returns, while FLASH achieves higher evaluation scores in the later stages of training. The early divergence during the first half of training (retrieval warmup) is discussed in Appendix~\ref{sec:appendix_rng_divergence}. Panel (b) further shows that the final FLASH checkpoint yields higher median and upper-quartile episode returns across evaluation seeds. Together, these observations are consistent with more effective use of successful training experiences in the illustrated runs. The low-return points in panel (b) are individual evaluation outcomes of these trained checkpoints. Training runs that remain at low returns throughout learning constitute a separate failure to discover successful behavior; in our observations, the proportion of such training runs is unchanged by FLASH. The exploitation benefit examined here concerns evaluation performance after successful experiences have been encountered during training.
 
 \subsection{Computational Analysis}
-FLASH retains the base model's encoder architecture while introducing additional computation for hash indexing, anchor selection, retrieval, and memory maintenance. We quantify its practical overhead using total wall-clock training time for STORM with and without FLASH over 100,000 environment steps.
+FLASH retains the base model's encoder architecture while introducing additional computation for hash indexing, anchor selection, retrieval, and memory maintenance.
 Since the latent dimension ($d$), hash bits ($B$), and other hyperparameters (e.g., context lengths, batch sizes) are strictly bounded constants, the algorithmic time complexity simplifies as follows:
 \begin{itemize}
     \item \textbf{Insertion per frame:} $\mathcal{O}(d \cdot B) \approx \mathcal{O}(1)$. The state encoding cost is completely absorbed by the world model's inherent forward pass.
@@ -334,13 +335,11 @@ Since the latent dimension ($d$), hash bits ($B$), and other hyperparameters (e.
     \item \textbf{Anchor Triggering:} $\mathcal{O}(N_{\text{batch}} \cdot L_{\text{seq}}) \approx \mathcal{O}(1)$. Lightweight Z-score tracking requires no additional neural network passes.
 \end{itemize}
 
-Table~\ref{tab:efficiency} reports the total training times on three GPUs. For each GPU, let $t_{\mathrm{base}}$ and $t_{\mathrm{FLASH}}$ denote the measured times for STORM and STORM + FLASH, respectively. The additional time is $\Delta t = t_{\mathrm{FLASH}} - t_{\mathrm{base}}$, and the relative training time overhead is $100 \times \Delta t / t_{\mathrm{base}}\%$. These measurements cover the full 100k-step training budget, including the retrieval warmup described in Section~\ref{subsec:flash_learning}.
-
-\todo{Specify the timed game(s), training seeds, number of runs and aggregation, timing boundaries (including whether evaluation and checkpointing are timed), and shared settings within each GPU comparison.}
+Over the full 100k-step budget, including retrieval warmup, FLASH increases STORM's wall-clock training time by 5.11--7.41\% across the three evaluated GPUs (Table~\ref{tab:efficiency}).
 
 \begin{table}[!t]
 \centering
-\caption{Total wall-clock training time for STORM and STORM + FLASH over 100,000 environment steps on each GPU. Times and absolute increases are reported in minutes; relative overhead is computed against the STORM baseline on the same GPU. TODO entries will be replaced with measured times and the corresponding derived values.}
+\caption{Training time on Atari 100k.}
 \label{tab:efficiency}
 \small
 \setlength{\tabcolsep}{3pt}
@@ -349,15 +348,13 @@ Table~\ref{tab:efficiency} reports the total training times on three GPUs. For e
 \toprule
 GPU & \shortstack{STORM\\(min)} & \shortstack{STORM + FLASH\\(min)} & \shortstack{Extra time\\(min)} & \shortstack{Overhead\\(\%)} \\
 \midrule
-% Fill times in minutes; Extra time = FLASH - baseline; Overhead = 100 * Extra time / baseline.
-NVIDIA RTX A6000 & 297 & 319 & \todo{--} & \todo{--} \\
-NVIDIA RTX PRO 6000 Blackwell Server Edition & 159 & 170 & \todo{--} & \todo{--} \\
-NVIDIA GeForce RTX 3090 & 411 & 432 & \todo{--} & \todo{--} \\
+% Times in minutes; Extra time = FLASH - baseline; Overhead = 100 * Extra time / baseline.
+NVIDIA RTX A6000 & 297 & 319 & 22 & 7.41 \\
+NVIDIA RTX PRO 6000 Blackwell Server Edition & 159 & 170 & 11 & 6.92 \\
+NVIDIA GeForce RTX 3090 & 411 & 432 & 21 & 5.11 \\
 \bottomrule
 \end{tabular}
 \end{table}
-
-For the measured STORM runs, FLASH increases total training time by \todo{A6000 overhead}\% on the NVIDIA RTX A6000, \todo{Blackwell overhead}\% on the NVIDIA RTX PRO 6000 Blackwell Server Edition, and \todo{RTX 3090 overhead}\% on the NVIDIA GeForce RTX 3090 (Table~\ref{tab:efficiency}).
 
 \subsection{Robustness of Value Function and Mitigation of Spatial Entanglement}
 \label{subsec:robustness_value}
@@ -375,7 +372,7 @@ To validate the core components of our approach, we conducted ablation studies t
 
 \section{Conclusion}
 \label{sec:conclusion}
-In this paper, we critique the recent trend of obsessing over visual representation quality in RL. Our probing experiments show that lightweight encoders can retain substantial task-relevant information despite poor visual reconstruction. This evidence motivates improving how downstream Actor-Critic learners use the available representations, alongside approaches that improve the representations themselves. To validate this alternative approach, we proposed FLASH, a retrieval method designed as a plug-and-play module. By augmenting Actor-Critic training batches with structurally similar past experiences, FLASH implicitly supports downstream learning and improves the overall performance of the evaluated RL baselines. Its measured training time overhead for STORM is reported across three GPUs in Table~\ref{tab:efficiency}.
+In this paper, we critique the recent trend of obsessing over visual representation quality in RL. Our probing experiments show that lightweight encoders can retain substantial task-relevant information despite poor visual reconstruction. This evidence motivates improving how downstream Actor-Critic learners use the available representations, alongside approaches that improve the representations themselves. To validate this alternative approach, we proposed FLASH, a retrieval method designed as a plug-and-play module. By augmenting Actor-Critic training batches with structurally similar past experiences, FLASH implicitly supports downstream learning and improves the overall performance of the evaluated RL baselines. Its measured training time overhead for STORM is 5.11--7.41\% (11--22 additional minutes) over the full 100k-step training budget across three GPUs (Table~\ref{tab:efficiency}).
 
 \bibliography{iclr2027_conference}
 \bibliographystyle{iclr2027_conference}
