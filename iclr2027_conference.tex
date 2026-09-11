@@ -361,7 +361,7 @@ NVIDIA GeForce RTX 3090 & 411 & 432 & 21 & 5.11 \\
 
 \subsection{Value Responses to Controlled Igloo Progression}
 \label{subsec:robustness_value}
-We examine how the critic responds to task-relevant visual changes using one STORM--FLASH checkpoint pair from Frostbite training seed 3710. Both models receive the same observation--action contexts, with the igloo region replaced by each of 17 construction stages while the surrounding observations and actions are held fixed across variants. This yields 17,421 evaluated contexts from 20 episodes. We measure the correlation between stage index and predicted value within each context.
+We examine how the critic responds to task-relevant visual changes using one STORM--FLASH checkpoint pair trained with the same random seed on Frostbite. Both models receive the same observation--action contexts, with the igloo region replaced by each of 17 construction stages while the surrounding observations and actions are held fixed across variants. This yields 17,421 evaluated contexts from 20 episodes. We measure the correlation between stage index and predicted value within each context.
 
 FLASH increases the mean Spearman correlation from $0.0756$ to $0.1622$, with an absolute difference of $0.0866$ (paired episode-bootstrap 95\% CI: $[0.0506,\,0.1213]$). The per-context median increases from $0.1281$ to $0.2240$, and FLASH has a higher correlation in 55.6\% of matched contexts. These results support improved average stage--value ordering for this checkpoint pair with the encoder architecture unchanged. Appendix~\ref{sec:appendix_value_robustness} details the protocol, uncertainty estimates, correlation distributions, and episode-level results.
 
@@ -554,19 +554,18 @@ As shown in Table \ref{tab:per_class_noise_flash}, the FLASH encoder exhibits ne
 \label{sec:appendix_value_robustness}
 This appendix details the fixed-checkpoint diagnostic in Section~\ref{subsec:robustness_value}. The experiment measures how predicted values order controlled changes in igloo construction stage. We report both the average effect and its variation across observation--action contexts. This analysis uses one checkpoint pair and is separate from the across-training-seed evaluation-return analysis in Appendix~\ref{sec:appendix_exploitation}.
 
-% Data: STORM/results/seed_3710/protocol.json,statistics.json, per_context_correlations.csv, global_profile.csv
 \subsection{Checkpoints and Shared Evaluation Contexts}
-We evaluate the world model and critic saved at 100,000 environment steps for training seed 3710. Both checkpoints use the same encoder architecture, but their learned parameters are not constrained to be identical. We load the networks in evaluation mode and do not train an additional probe or update either model.
+We evaluate one Baseline--FLASH pair trained with the same random seed, using the world models and critics saved at 100,000 environment steps. Both models share the encoder architecture and remain fixed during evaluation.
 
-We collect 20,000 observations and their actions and RAM states once using the Baseline policy in \texttt{ALE/Frostbite-v5}, with same collection seed. The environment uses action repeat 4 and observations resized to $64\times64$ pixels; the observation count refers to these agent-step observations, not raw emulator frames. Actions are sampled from the Baseline policy, with a random action at the beginning of each episode when no model context is available. The saved data cover 19 completed episodes and a partially observed twentieth episode when the collection budget ends. Episode identifiers, within-episode observation indices, and termination/truncation flags are retained. Both models are evaluated on this same saved dataset, so each paired comparison has identical background observations and action history. The sampled context distribution is that of the Baseline policy.
+We collect 20,000 observations and actions once using the Baseline policy in Frostbite, with action repeat 4 and observations resized to $64\times64$ pixels. This count refers to agent-step observations, not raw emulator frames. The dataset covers 19 completed episodes and part of a twentieth episode. Both models receive the same collected observations and action histories, so their predictions are compared on matched contexts drawn from the Baseline policy.
 
 \paragraph{Context construction and stage intervention.}
-Using RAM byte 77 to identify the observed igloo stage (255 maps to stage 0; other values map to the byte value plus one), we divide the data into consecutive blocks with unchanged stage and a maximum length of 64 observations. Blocks do not cross episode boundaries, and blocks shorter than nine observations are excluded. This produces 320 valid blocks. For each block, we create 17 versions by replacing the igloo region in every observation with a fixed stage template for $k\in\{0,\ldots,16\}$. The replacement uses the $7\times16$ pixel region with zero-based row slice $10{:}17$ and column slice $42{:}58$. All pixels outside this region and all actions remain identical across the 17 versions. The background may evolve over time within a block; it is held fixed \emph{across stage variants} at each time step. No random background noise is injected in this experiment.
+We use RAM-derived igloo stages to divide the data into consecutive blocks with unchanged stage and a maximum length of 64 observations. Blocks do not cross episode boundaries, and those shorter than nine observations are excluded, leaving 320 valid blocks. For each block, we replace the igloo region in every observation with each of 17 stage templates ($0$--$16$). All pixels outside the igloo region and all actions remain identical across variants. The background can change over time within a block, but is held fixed across stage variants at each time step. No random background noise is injected.
 
-For each version, the first eight observations initialize the temporal context. We then evaluate every remaining observation using its encoded latent and the temporal features derived from the preceding observations and actions, while advancing the temporal cache through the block. In total, this yields $N=17{,}421$ evaluated contexts. Here, a \emph{context} (the unit previously called a per-sequence evaluation) denotes one evaluated time point with its preceding observation--action history, tested under all 17 stage variants. The 17 variants are used to calculate one correlation; they are not 17 independent evaluation samples.
+For each variant, the first eight observations initialize the temporal context; subsequent observations are evaluated using their encoded latents and preceding observation--action histories. This yields $N=17{,}421$ evaluated contexts. Each context denotes one evaluated time point with its history, tested under all 17 stage variants. These variants yield one correlation per context, rather than 17 independent evaluation samples.
 
-\paragraph{Latent sampling and saved outputs.}
-We retain stochastic latent sampling. Before each stage variant of block $b$ (indexed from zero), we reset the random-number seeds to $2027+b$, using the same seed for both models. This controls the random-number streams across the paired evaluations without forcing their latent samples to be identical. The results use one sampled value per context and stage; they do not average over repeated latent draws. We save the two $N\times17$ value arrays, context/episode/block identifiers, per-context correlations, stage-wise mean values, stage templates, and protocol settings. The numerical results below are derived from \path{STORM/results/seed_3710/}.
+\paragraph{Latent sampling.}
+Stochastic latent sampling uses common random seeds across models and stage variants within each block. Each context--stage prediction uses one latent draw; values are not averaged over repeated draws.
 
 \subsection{Mean Correlations, Effect Sizes, and Bootstrap Uncertainty}
 Let $v_i^{(m)}(k)$ be the predicted value for model $m\in\{\mathrm{B},\mathrm{F}\}$ at context $i$ under stage $k$. We calculate
@@ -582,12 +581,12 @@ For either correlation $c\in\{\rho,\tau_b\}$, the mean and the paired absolute e
 \overline{\Delta c}=\frac{1}{N}\sum_{i=1}^{N}\left(c_i^{(\mathrm{F})}-c_i^{(\mathrm{B})}\right).
 \label{eq:value_mean_effect}
 \end{equation}
-Each evaluated context has equal weight in these point estimates. We estimate uncertainty using 10,000 paired episode-bootstrap replicates with bootstrap seed 2027. In each replicate, we draw 20 episode identifiers with replacement and include all evaluated contexts from each selected episode, preserving the Baseline--FLASH pairing and the multiplicity of repeated episodes. We recompute the mean using the number of contexts in that replicate as the denominator, thereby accounting for unequal episode lengths. The 2.5th and 97.5th percentiles give the 95\% confidence intervals. Resampling whole episodes keeps the observed within-episode temporal dependence intact instead of treating adjacent frames as independent observations.
+Each evaluated context has equal weight in these point estimates. We estimate uncertainty using 10,000 paired episode-bootstrap replicates. In each replicate, we draw 20 episode identifiers with replacement and include all evaluated contexts from each selected episode, preserving the Baseline--FLASH pairing and the multiplicity of repeated episodes. We recompute the mean using the number of contexts in that replicate as the denominator, thereby accounting for unequal episode lengths. The 2.5th and 97.5th percentiles give the 95\% confidence intervals. Resampling whole episodes keeps the observed within-episode temporal dependence intact instead of treating adjacent frames as independent observations.
 
 \begin{table}[!t]
 \centering
 \small
-\caption{Mean per-context correlations and paired absolute effect sizes for the seed-3710 checkpoint pair. Brackets give paired episode-bootstrap percentile 95\% CIs from 10,000 replicates over 20 observed episodes (19 complete and one partial).}
+\caption{Mean per-context correlations and paired absolute effect sizes for the evaluated checkpoint pair. Brackets give paired episode-bootstrap percentile 95\% CIs from 10,000 replicates over 20 observed episodes (19 complete and one partial).}
 \label{tab:value_metrics}
 \begin{tabular}{lcc}
 \toprule
@@ -600,7 +599,7 @@ FLASH $-$ Baseline & $0.0866$ $[0.0506,\,0.1213]$ & $0.0946$ $[0.0670,\,0.1213]$
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:value_metrics} shows positive mean differences for both metrics: $\overline{\Delta\rho}=0.0866$ and $\overline{\Delta\tau_b}=0.0946$. Both difference intervals lie above zero, providing evidence of a positive mean effect under this episode-resampling analysis; we do not report a separate hypothesis-test $p$-value. The FLASH mean Spearman correlation is approximately $2.15$ times the Baseline mean, but its absolute value ($0.1622$) remains weak. The absolute effect and its interval are therefore more informative than the relative increase alone. These intervals describe uncertainty over sampled evaluation episodes for two fixed checkpoints. They do not include variation across training seeds or repeated latent draws, and the 17,421 contexts are not independent training runs.
+Table~\ref{tab:value_metrics} shows positive mean differences for both metrics: $\overline{\Delta\rho}=0.0866$ and $\overline{\Delta\tau_b}=0.0946$. Both difference intervals lie above zero, providing evidence of a positive mean effect under this episode-resampling analysis. The FLASH mean Spearman correlation is approximately $2.15$ times the Baseline mean, but its absolute value ($0.1622$) remains weak. The absolute effect and its interval are therefore more informative than the relative increase alone. These intervals describe uncertainty over sampled evaluation episodes for two fixed checkpoints. They do not include variation across training seeds or repeated latent draws, and the 17,421 contexts are not independent training runs.
 
 \subsection{Distributions and Matched-Context Changes}
 Table~\ref{tab:value_distribution} reports the median, quartiles, and interquartile range (IQR) of each model's per-context correlations and of their paired differences. The median paired difference is computed after subtracting values within each matched context; it need not equal the difference between the two models' separate medians. Quartiles describe variation across contexts, whereas the confidence intervals in Table~\ref{tab:value_metrics} describe uncertainty in a mean.
@@ -630,7 +629,7 @@ Both medians increase, from $0.1281$ to $0.2240$ for Spearman and from $0.0517$ 
 \begin{figure}[!t]
 \centering
 \includegraphics[width=\textwidth]{experiment/frostbite_value_seed3710_distributions.pdf}
-\caption{Per-context correlation distributions for the fixed seed-3710 checkpoint pair. Left: Baseline and FLASH correlations. Right: paired FLASH-minus-Baseline differences; the dashed line marks zero. Top: Spearman; bottom: Kendall. Histogram counts are evaluated contexts, which may be temporally dependent within episodes.}
+\caption{Per-context correlation distributions for the evaluated checkpoint pair. Left: Baseline and FLASH correlations. Right: paired FLASH-minus-Baseline differences; the dashed line marks zero. Top: Spearman; bottom: Kendall. Histogram counts are evaluated contexts, which may be temporally dependent within episodes.}
 \label{fig:value_distributions}
 \end{figure}
 
@@ -660,32 +659,32 @@ For each evaluation episode $e$, we average the paired differences over its $n_e
 \begin{table}[!t]
 \centering
 \small
-\caption{Paired mean correlation differences by evaluation episode. IDs are zero-based collection identifiers; episode 19 is only partially observed because collection stops at 20,000 observations. Positive differences denote higher average correlation under FLASH.}
+\caption{Paired mean correlation differences by evaluation episode. The final episode is partially observed. Positive differences denote higher average correlation under FLASH.}
 \label{tab:value_episode_changes}
 \begin{tabular}{rrrr}
 \toprule
-Episode ID & Evaluated contexts & Mean $\Delta\rho$ & Mean $\Delta\tau_b$ \\
+Episode & Evaluated contexts & Mean $\Delta\rho$ & Mean $\Delta\tau_b$ \\
 \midrule
-0 & 783 & $-0.0006$ & $+0.0320$ \\
-1 & 1,048 & $-0.0292$ & $+0.0172$ \\
-2 & 957 & $+0.0343$ & $+0.0476$ \\
-3 & 1,010 & $+0.0031$ & $+0.0448$ \\
-4 & 861 & $+0.1738$ & $+0.1783$ \\
-5 & 1,008 & $+0.1237$ & $+0.1139$ \\
-6 & 907 & $+0.2387$ & $+0.2201$ \\
-7 & 793 & $+0.1170$ & $+0.1174$ \\
-8 & 896 & $+0.1587$ & $+0.1516$ \\
-9 & 890 & $+0.1461$ & $+0.1416$ \\
-10 & 896 & $+0.0800$ & $+0.1003$ \\
-11 & 952 & $-0.0569$ & $-0.0224$ \\
-12 & 956 & $+0.0522$ & $+0.0625$ \\
-13 & 444 & $+0.1168$ & $+0.0962$ \\
-14 & 848 & $+0.1453$ & $+0.1337$ \\
-15 & 929 & $+0.1605$ & $+0.1551$ \\
-16 & 712 & $+0.0947$ & $+0.0824$ \\
-17 & 857 & $+0.1585$ & $+0.1369$ \\
-18 & 1,010 & $+0.0444$ & $+0.0581$ \\
-19 & 664 & $+0.0123$ & $+0.0419$ \\
+1 & 783 & $-0.0006$ & $+0.0320$ \\
+2 & 1,048 & $-0.0292$ & $+0.0172$ \\
+3 & 957 & $+0.0343$ & $+0.0476$ \\
+4 & 1,010 & $+0.0031$ & $+0.0448$ \\
+5 & 861 & $+0.1738$ & $+0.1783$ \\
+6 & 1,008 & $+0.1237$ & $+0.1139$ \\
+7 & 907 & $+0.2387$ & $+0.2201$ \\
+8 & 793 & $+0.1170$ & $+0.1174$ \\
+9 & 896 & $+0.1587$ & $+0.1516$ \\
+10 & 890 & $+0.1461$ & $+0.1416$ \\
+11 & 896 & $+0.0800$ & $+0.1003$ \\
+12 & 952 & $-0.0569$ & $-0.0224$ \\
+13 & 956 & $+0.0522$ & $+0.0625$ \\
+14 & 444 & $+0.1168$ & $+0.0962$ \\
+15 & 848 & $+0.1453$ & $+0.1337$ \\
+16 & 929 & $+0.1605$ & $+0.1551$ \\
+17 & 712 & $+0.0947$ & $+0.0824$ \\
+18 & 857 & $+0.1585$ & $+0.1369$ \\
+19 & 1,010 & $+0.0444$ & $+0.0581$ \\
+20 & 664 & $+0.0123$ & $+0.0419$ \\
 \bottomrule
 \end{tabular}
 \end{table}
