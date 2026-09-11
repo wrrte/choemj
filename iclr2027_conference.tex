@@ -359,21 +359,11 @@ NVIDIA GeForce RTX 3090 & 411 & 432 & 21 & 5.11 \\
 \end{tabular}
 \end{table}
 
-\subsection{Robustness of Value Function and Mitigation of Spatial Entanglement}
+\subsection{Value Responses to Controlled Igloo Progression}
 \label{subsec:robustness_value}
-To empirically evaluate how well FLASH mitigates the ``spatial entanglement'' hypothesis discussed earlier (Section \ref{sec:representation}), we conducted a rigorous robustness test on the Frostbite environment's value function. Specifically, we collected 17,496 continuous frames across varying stages of igloo construction. For each sequence, we artificially fixed the background and iteratively replaced only the bounding box of the igloo with templates of all 17 possible stages (0 to 16 blocks). We then computed Spearman's $\rho$ and Kendall's $\tau$ correlation coefficients between the ground-truth stage index and the predicted value to measure how consistently the model recognizes the isolated igloo progression against constant background noise.
+We examine how the critic responds to task-relevant visual changes using one STORM--FLASH checkpoint pair from Frostbite training seed 3710. Both models receive the same observation--action contexts, with the igloo region replaced by each of 17 construction stages while the surrounding observations and actions are held fixed across variants. This yields 17,421 evaluated contexts from 20 episodes. We measure the correlation between stage index and predicted value within each context.
 
-Our primary metric of interest is the per-sequence correlation, which directly quantifies the model's resistance to spatial entanglement. On an individual, per-sequence basis, the Baseline model suffers from near-random correlation ($\rho=0.0668$), proving that it is heavily entangled with the background and cannot reliably isolate the igloo's value in a frozen context. In striking contrast, FLASH more than doubles this per-sequence robustness ($\rho=0.1447$).
-
-\todo{Revise the interpretation to acknowledge that the absolute correlation remains weak despite the approximately $2.17\times$ relative increase. Report the absolute effect size, a mean per-sequence Spearman correlation difference of $0.0779$, and avoid treating this result alone as proof of spatial entanglement or its mitigation.}
-
-\todo{Report bootstrap 95\% confidence intervals for each model's mean per-sequence correlation and for the FLASH-minus-Baseline difference; assess whether the difference is statistically distinguishable from zero. If both models use the same background contexts, use paired resampling. Account for temporal dependence in the 17,496 continuous frames through episode-level or block resampling, and document the sampling unit, number of independent episodes, bootstrap repetitions, and interval method. Clarify whether uncertainty covers only evaluation contexts for fixed checkpoints or also variation across training runs.}
-
-\todo{Add the distribution of per-sequence correlations and, for matched contexts, their paired differences in Appendix~\ref{sec:appendix_value_robustness}: include a histogram or violin plot, median and interquartile range, and the fraction of contexts where FLASH improves over Baseline. Define a sequence as the 17 stage variants of one fixed background if this matches the implementation, and report how undefined correlations from constant predictions are handled. Update Table~\ref{tab:value_metrics} with the confidence intervals and summarize the results here.}
-
-Crucially, this improvement is achieved without modifying the underlying world model encoder. As detailed in Appendix \ref{sec:appendix_noise_robustness_flash}, probing the FLASH encoder directly reveals that its raw latent representations remain just as vulnerable to spatial entanglement as the Baseline. FLASH targets downstream discrimination between aliased states while retaining the encoder architecture; it does not require eliminating aliasing in the encoder outputs.
-
-Furthermore, we examined the \textit{Global Average Profile} (averaging the value predictions over all 17,496 sequences). The Baseline profile generally increases with igloo construction stage, yielding a high rank correlation ($\rho=0.9632$). FLASH's profile ($\rho=0.6373$) peaks at Stage 11 and is lower at the subsequent stages as the igloo nears completion (Stage 16). As detailed in Appendix~\ref{sec:appendix_value_robustness}, the value increase from Stage 0 to Stage 11 is over twice as large in FLASH ($\sim60.7$) as in the Baseline ($\sim28.5$). Thus, FLASH exhibits a larger value difference across the early-to-mid construction stages and a distinct profile near completion. Its higher average per-sequence rank correlation and lower rank correlation of the global average profile summarize different aspects of these predictions: the former measures ordering within individual background contexts, whereas the latter measures ordering after averaging across contexts.
+FLASH increases the mean Spearman correlation from $0.0756$ to $0.1622$, with an absolute difference of $0.0866$ (paired episode-bootstrap 95\% CI: $[0.0506,\,0.1213]$). The per-context median increases from $0.1281$ to $0.2240$, and FLASH has a higher correlation in 55.6\% of matched contexts. These results support improved average stage--value ordering for this checkpoint pair with the encoder architecture unchanged. Appendix~\ref{sec:appendix_value_robustness} details the protocol, uncertainty estimates, correlation distributions, and episode-level results.
 
 \subsection{Ablation Studies}
 \label{subsec:ablation_main}
@@ -560,56 +550,185 @@ As shown in Table \ref{tab:per_class_noise_flash}, the FLASH encoder exhibits ne
     \end{tabular}
 \end{table}
 
-\section{Robustness of Value Function: Detailed Metrics for Baseline and FLASH}
+\section{Controlled Igloo-Stage Evaluation: Protocol and Detailed Value Metrics}
 \label{sec:appendix_value_robustness}
-This section provides the complete quantitative results for the value function robustness evaluation discussed in Section~\ref{subsec:robustness_value}. We evaluate the consistency of the predicted value against the 17 sequential stages of igloo construction under frozen background contexts.
+This appendix details the fixed-checkpoint diagnostic in Section~\ref{subsec:robustness_value}. The experiment measures how predicted values order controlled changes in igloo construction stage. We report both the average effect and its variation across observation--action contexts. This analysis uses one checkpoint pair and is separate from the across-training-seed evaluation-return analysis in Appendix~\ref{sec:appendix_exploitation}.
+
+% Data: STORM/results/seed_3710/protocol.json,statistics.json, per_context_correlations.csv, global_profile.csv
+\subsection{Checkpoints and Shared Evaluation Contexts}
+We evaluate the world model and critic saved at 100,000 environment steps for training seed 3710. Both checkpoints use the same encoder architecture, but their learned parameters are not constrained to be identical. We load the networks in evaluation mode and do not train an additional probe or update either model.
+
+We collect 20,000 observations and their actions and RAM states once using the Baseline policy in \texttt{ALE/Frostbite-v5}, with same collection seed. The environment uses action repeat 4 and observations resized to $64\times64$ pixels; the observation count refers to these agent-step observations, not raw emulator frames. Actions are sampled from the Baseline policy, with a random action at the beginning of each episode when no model context is available. The saved data cover 19 completed episodes and a partially observed twentieth episode when the collection budget ends. Episode identifiers, within-episode observation indices, and termination/truncation flags are retained. Both models are evaluated on this same saved dataset, so each paired comparison has identical background observations and action history. The sampled context distribution is that of the Baseline policy.
+
+\paragraph{Context construction and stage intervention.}
+Using RAM byte 77 to identify the observed igloo stage (255 maps to stage 0; other values map to the byte value plus one), we divide the data into consecutive blocks with unchanged stage and a maximum length of 64 observations. Blocks do not cross episode boundaries, and blocks shorter than nine observations are excluded. This produces 320 valid blocks. For each block, we create 17 versions by replacing the igloo region in every observation with a fixed stage template for $k\in\{0,\ldots,16\}$. The replacement uses the $7\times16$ pixel region with zero-based row slice $10{:}17$ and column slice $42{:}58$. All pixels outside this region and all actions remain identical across the 17 versions. The background may evolve over time within a block; it is held fixed \emph{across stage variants} at each time step. No random background noise is injected in this experiment.
+
+For each version, the first eight observations initialize the temporal context. We then evaluate every remaining observation using its encoded latent and the temporal features derived from the preceding observations and actions, while advancing the temporal cache through the block. In total, this yields $N=17{,}421$ evaluated contexts. Here, a \emph{context} (the unit previously called a per-sequence evaluation) denotes one evaluated time point with its preceding observation--action history, tested under all 17 stage variants. The 17 variants are used to calculate one correlation; they are not 17 independent evaluation samples.
+
+\paragraph{Latent sampling and saved outputs.}
+We retain stochastic latent sampling. Before each stage variant of block $b$ (indexed from zero), we reset the random-number seeds to $2027+b$, using the same seed for both models. This controls the random-number streams across the paired evaluations without forcing their latent samples to be identical. The results use one sampled value per context and stage; they do not average over repeated latent draws. We save the two $N\times17$ value arrays, context/episode/block identifiers, per-context correlations, stage-wise mean values, stage templates, and protocol settings. The numerical results below are derived from \path{STORM/results/seed_3710/}.
+
+\subsection{Mean Correlations, Effect Sizes, and Bootstrap Uncertainty}
+Let $v_i^{(m)}(k)$ be the predicted value for model $m\in\{\mathrm{B},\mathrm{F}\}$ at context $i$ under stage $k$. We calculate
+\begin{equation}
+\rho_i^{(m)}=\operatorname{Spearman}\!\left((0,\ldots,16),\,(v_i^{(m)}(0),\ldots,v_i^{(m)}(16))\right),
+\label{eq:value_context_rho}
+\end{equation}
+and analogously Kendall's $\tau_b$. Tied predictions use the standard tie handling of these rank correlations. If a model predicts a constant value across all 17 stages, its correlation is undefined. A context with an undefined correlation in either model is excluded from the paired analysis for that metric, rather than assigned zero. No correlations were undefined in this dataset, so all 17,421 contexts enter both analyses.
+
+For either correlation $c\in\{\rho,\tau_b\}$, the mean and the paired absolute effect size are
+\begin{equation}
+\bar c^{(m)}=\frac{1}{N}\sum_{i=1}^{N}c_i^{(m)},\qquad
+\overline{\Delta c}=\frac{1}{N}\sum_{i=1}^{N}\left(c_i^{(\mathrm{F})}-c_i^{(\mathrm{B})}\right).
+\label{eq:value_mean_effect}
+\end{equation}
+Each evaluated context has equal weight in these point estimates. We estimate uncertainty using 10,000 paired episode-bootstrap replicates with bootstrap seed 2027. In each replicate, we draw 20 episode identifiers with replacement and include all evaluated contexts from each selected episode, preserving the Baseline--FLASH pairing and the multiplicity of repeated episodes. We recompute the mean using the number of contexts in that replicate as the denominator, thereby accounting for unequal episode lengths. The 2.5th and 97.5th percentiles give the 95\% confidence intervals. Resampling whole episodes keeps the observed within-episode temporal dependence intact instead of treating adjacent frames as independent observations.
 
 \begin{table}[!t]
-    \centering
-    \caption{Correlation coefficients of predicted state values against igloo construction stages (0--16). Metric 1 measures the average correlation across individual noisy sequences, demonstrating FLASH's superior resistance to spatial entanglement. Metric 2 measures the correlation of the globally averaged value profile.}
-    \label{tab:value_metrics}
-    \begin{tabular}{lcccc}
-        \toprule
-        \textbf{Model} & \multicolumn{2}{c}{\textbf{Metric 1 (Per-Sequence Avg.)}} & \multicolumn{2}{c}{\textbf{Metric 2 (Global Average Profile)}} \\
-        \cmidrule(lr){2-3} \cmidrule(lr){4-5}
-        & Spearman's $\rho$ ($\uparrow$) & Kendall's $\tau$ ($\uparrow$) & Spearman's $\rho$ & Kendall's $\tau$ \\
-        \midrule
-        Baseline (STORM) & $0.0668$ & $0.0315$ & $0.9632$ & $0.8824$ \\
-        FLASH (Ours) & $\mathbf{0.1447}$ & $\mathbf{0.1180}$ & $0.6373$ & $0.5441$ \\
-        \bottomrule
-    \end{tabular}
+\centering
+\small
+\caption{Mean per-context correlations and paired absolute effect sizes for the seed-3710 checkpoint pair. Brackets give paired episode-bootstrap percentile 95\% CIs from 10,000 replicates over 20 observed episodes (19 complete and one partial).}
+\label{tab:value_metrics}
+\begin{tabular}{lcc}
+\toprule
+Statistic & Spearman's $\rho$ & Kendall's $\tau_b$ \\
+\midrule
+Baseline (STORM) & $0.0756$ $[0.0447,\,0.1097]$ & $0.0397$ $[0.0143,\,0.0676]$ \\
+FLASH & $0.1622$ $[0.1269,\,0.1988]$ & $0.1343$ $[0.1063,\,0.1634]$ \\
+FLASH $-$ Baseline & $0.0866$ $[0.0506,\,0.1213]$ & $0.0946$ $[0.0670,\,0.1213]$ \\
+\bottomrule
+\end{tabular}
 \end{table}
+
+Table~\ref{tab:value_metrics} shows positive mean differences for both metrics: $\overline{\Delta\rho}=0.0866$ and $\overline{\Delta\tau_b}=0.0946$. Both difference intervals lie above zero, providing evidence of a positive mean effect under this episode-resampling analysis; we do not report a separate hypothesis-test $p$-value. The FLASH mean Spearman correlation is approximately $2.15$ times the Baseline mean, but its absolute value ($0.1622$) remains weak. The absolute effect and its interval are therefore more informative than the relative increase alone. These intervals describe uncertainty over sampled evaluation episodes for two fixed checkpoints. They do not include variation across training seeds or repeated latent draws, and the 17,421 contexts are not independent training runs.
+
+\subsection{Distributions and Matched-Context Changes}
+Table~\ref{tab:value_distribution} reports the median, quartiles, and interquartile range (IQR) of each model's per-context correlations and of their paired differences. The median paired difference is computed after subtracting values within each matched context; it need not equal the difference between the two models' separate medians. Quartiles describe variation across contexts, whereas the confidence intervals in Table~\ref{tab:value_metrics} describe uncertainty in a mean.
 
 \begin{table}[!t]
-    \centering
-    \caption{Global Average Value by Igloo Stage (averaged across 17,496 evaluation frames). The Baseline profile increases monotonically, whereas FLASH peaks at Stage 11 and declines as the igloo nears completion.}
-    \label{tab:global_average_values}
-    \begin{tabular}{crr}
-        \toprule
-        \textbf{Igloo Stage} & \textbf{Baseline Global Avg Value} & \textbf{FLASH Global Avg Value} \\
-        \midrule
-        00 & 127.5691 & 125.2802 \\
-        01 & 135.9656 & 141.3974 \\
-        02 & 140.2887 & 151.5935 \\
-        03 & 145.0847 & 156.2869 \\
-        04 & 148.7062 & 161.6628 \\
-        05 & 150.5298 & 168.0688 \\
-        06 & 148.8048 & 172.0754 \\
-        07 & 150.3007 & 177.6254 \\
-        08 & 150.6747 & 179.3095 \\
-        09 & 150.4447 & 181.7165 \\
-        10 & 151.1262 & 183.2160 \\
-        11 & 156.0479 & \textbf{185.9767} \\
-        12 & 161.0758 & 185.9596 \\
-        13 & 157.5797 & 179.8149 \\
-        14 & 156.2392 & 173.7596 \\
-        15 & 159.1790 & 167.9141 \\
-        16 & \textbf{164.7938} & 170.7361 \\
-        \bottomrule
-    \end{tabular}
+\centering
+\small
+\caption{Distributions across 17,421 matched contexts. Q1 and Q3 are the 25th and 75th percentiles; IQR is Q3$-$Q1. Difference rows use per-context FLASH-minus-Baseline differences.}
+\label{tab:value_distribution}
+\begin{tabular}{llrrrr}
+\toprule
+Metric & Distribution & Median & Q1 & Q3 & IQR \\
+\midrule
+$\rho$ & Baseline & $0.1281$ & $-0.4297$ & $0.5857$ & $1.0154$ \\
+$\rho$ & FLASH & $0.2240$ & $-0.3051$ & $0.7077$ & $1.0128$ \\
+$\rho$ & Difference & $0.0490$ & $-0.1886$ & $0.3744$ & $0.5630$ \\
+\midrule
+$\tau_b$ & Baseline & $0.0517$ & $-0.3321$ & $0.4118$ & $0.7439$ \\
+$\tau_b$ & FLASH & $0.1637$ & $-0.2404$ & $0.5469$ & $0.7873$ \\
+$\tau_b$ & Difference & $0.0701$ & $-0.1715$ & $0.3529$ & $0.5244$ \\
+\bottomrule
+\end{tabular}
 \end{table}
 
+Both medians increase, from $0.1281$ to $0.2240$ for Spearman and from $0.0517$ to $0.1637$ for Kendall. The median paired changes are also positive ($0.0490$ and $0.0701$). Nevertheless, the distributions remain broad: both models' first quartiles are negative, and the middle 50\% of their paired differences includes both negative and positive values. The Spearman IQR is approximately unchanged across models ($1.0154$ versus $1.0128$), while the Kendall IQR increases ($0.7439$ versus $0.7873$). Thus, a higher average does not imply uniformly improved ordering or a narrower spread across contexts.
 
+\begin{figure}[!t]
+\centering
+\includegraphics[width=\textwidth]{experiment/frostbite_value_seed3710_distributions.pdf}
+\caption{Per-context correlation distributions for the fixed seed-3710 checkpoint pair. Left: Baseline and FLASH correlations. Right: paired FLASH-minus-Baseline differences; the dashed line marks zero. Top: Spearman; bottom: Kendall. Histogram counts are evaluated contexts, which may be temporally dependent within episodes.}
+\label{fig:value_distributions}
+\end{figure}
+
+\begin{table}[!t]
+\centering
+\small
+\caption{Direction and magnitude of changes within matched contexts. Conditional mean changes average only the contexts with positive or negative change, respectively; all differences are FLASH minus Baseline.}
+\label{tab:value_context_changes}
+\begin{tabular}{lrr}
+\toprule
+Statistic & Spearman's $\rho$ & Kendall's $\tau_b$ \\
+\midrule
+Higher under FLASH & 9,686 (55.60\%) & 10,001 (57.41\%) \\
+Lower under FLASH & 7,733 (44.39\%) & 7,392 (42.43\%) \\
+Equal & 2 (0.01\%) & 28 (0.16\%) \\
+Mean change where positive & $+0.4289$ & $+0.3767$ \\
+Mean change where negative & $-0.3422$ & $-0.2867$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+FLASH has a higher Spearman correlation in 9,686 contexts (55.60\%), a lower correlation in 7,733 (44.39\%), and an equal correlation in two. The corresponding Kendall counts are 10,001 (57.41\%), 7,392 (42.43\%), and 28. Among contexts with a positive Spearman change, the mean increase is $0.4289$; among those with a negative change, the mean decrease has magnitude $0.3422$. The corresponding Kendall magnitudes are $0.3767$ and $0.2867$. Both the frequency and the conditional magnitude of positive changes therefore contribute to the positive overall means. These observations support improvement extending beyond a few isolated positive contexts, while also documenting substantial negative changes. Figure~\ref{fig:value_distributions} visualizes both sides of the distributions.
+
+\subsection{Variation Across Evaluation Episodes}
+For each evaluation episode $e$, we average the paired differences over its $n_e$ evaluated contexts. Table~\ref{tab:value_episode_changes} reports these episode-specific means. The mean Spearman difference is positive in 17 of 20 episodes (85\%), and the mean Kendall difference is positive in 19 of 20 (95\%). The respective ranges are $[-0.0569,\,0.2387]$ and $[-0.0224,\,0.2201]$. Thus, the positive pooled effect occurs across multiple episodes, although individual episodes contain both positive and negative context-level changes. These counts are descriptive results for the same fixed checkpoint pair, not additional training-seed replications or separate significance tests. The pooled estimates in Table~\ref{tab:value_metrics} weight contexts equally; they are not unweighted means of these 20 episode means.
+
+\begin{table}[!t]
+\centering
+\small
+\caption{Paired mean correlation differences by evaluation episode. IDs are zero-based collection identifiers; episode 19 is only partially observed because collection stops at 20,000 observations. Positive differences denote higher average correlation under FLASH.}
+\label{tab:value_episode_changes}
+\begin{tabular}{rrrr}
+\toprule
+Episode ID & Evaluated contexts & Mean $\Delta\rho$ & Mean $\Delta\tau_b$ \\
+\midrule
+0 & 783 & $-0.0006$ & $+0.0320$ \\
+1 & 1,048 & $-0.0292$ & $+0.0172$ \\
+2 & 957 & $+0.0343$ & $+0.0476$ \\
+3 & 1,010 & $+0.0031$ & $+0.0448$ \\
+4 & 861 & $+0.1738$ & $+0.1783$ \\
+5 & 1,008 & $+0.1237$ & $+0.1139$ \\
+6 & 907 & $+0.2387$ & $+0.2201$ \\
+7 & 793 & $+0.1170$ & $+0.1174$ \\
+8 & 896 & $+0.1587$ & $+0.1516$ \\
+9 & 890 & $+0.1461$ & $+0.1416$ \\
+10 & 896 & $+0.0800$ & $+0.1003$ \\
+11 & 952 & $-0.0569$ & $-0.0224$ \\
+12 & 956 & $+0.0522$ & $+0.0625$ \\
+13 & 444 & $+0.1168$ & $+0.0962$ \\
+14 & 848 & $+0.1453$ & $+0.1337$ \\
+15 & 929 & $+0.1605$ & $+0.1551$ \\
+16 & 712 & $+0.0947$ & $+0.0824$ \\
+17 & 857 & $+0.1585$ & $+0.1369$ \\
+18 & 1,010 & $+0.0444$ & $+0.0581$ \\
+19 & 664 & $+0.0123$ & $+0.0419$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Global Average Value Profiles}
+For completeness, we also average predicted values across all contexts at each stage, $\bar v^{(m)}(k)=N^{-1}\sum_i v_i^{(m)}(k)$, and then correlate this 17-point profile with stage index. This reverses the order of averaging and correlation relative to the per-context metric and answers a different question. Baseline and FLASH respectively obtain Spearman correlations of $0.9681$ and $0.7819$, and Kendall correlations of $0.8971$ and $0.6765$, for their global profiles. These are point estimates for the averaged profiles, not additional per-context means or bootstrap intervals.
+
+Table~\ref{tab:global_average_values} gives the complete profiles. The Baseline profile generally rises and reaches its maximum at stage 16, with some intermediate decreases. The FLASH profile peaks at stage 12, falls through stage 15, and rises again at stage 16. Thus, FLASH's higher mean per-context ordering coexists with a lower correlation of its global average profile. Neither averaging procedure implies the result of the other. Differences in raw predicted-value magnitudes are descriptive and do not by themselves establish more accurate value estimates.
+
+\begin{table}[!t]
+\centering
+\small
+\caption{Global average predicted value by igloo stage, using the same 17,421 contexts for both models. Bold entries mark each model's maximum.}
+\label{tab:global_average_values}
+\begin{tabular}{crr}
+\toprule
+Igloo stage & Baseline & FLASH \\
+\midrule
+0 & 122.5811 & 120.9317 \\
+1 & 130.3185 & 134.1611 \\
+2 & 135.5643 & 143.4519 \\
+3 & 140.1353 & 147.9921 \\
+4 & 143.5138 & 153.3676 \\
+5 & 143.5928 & 161.1659 \\
+6 & 142.2332 & 164.6773 \\
+7 & 144.1948 & 169.2527 \\
+8 & 144.3742 & 171.7132 \\
+9 & 144.5918 & 175.1732 \\
+10 & 146.0023 & 177.5542 \\
+11 & 149.7183 & 180.4352 \\
+12 & 152.8047 & \textbf{181.0360} \\
+13 & 149.8857 & 174.6467 \\
+14 & 148.4644 & 169.3923 \\
+15 & 151.2220 & 165.3206 \\
+16 & \textbf{158.5796} & 174.8477 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Interpretation and Scope}
+For this checkpoint pair on Baseline-collected contexts, FLASH exhibits higher mean and median stage--value correlations, positive paired mean differences with episode-bootstrap intervals above zero, and positive episode-mean changes in most sampled episodes. The absolute correlations nevertheless remain weak on average, and a substantial fraction of contexts show lower correlations under FLASH. These findings support an average improvement in ordering for the evaluated pair, rather than uniform robustness across backgrounds.
+
+The diagnostic tests whether predicted values increase with igloo stage under a controlled visual intervention. It does not directly measure whether latent states are disentangled, and a negative correlation can still reflect sensitivity to stage changes. Moreover, a critic predicts future return under its policy; the experiment does not establish that true expected return must increase monotonically with stage in every context. Replacing image regions also does not guarantee that each modified observation--action sequence corresponds to a realizable environment trajectory. Consequently, these results alone neither establish that spatial entanglement has been removed nor identify the cause of the evaluation-return improvements discussed in Section~\ref{subsec:exploitation_amplifier}. The background-noise probe classification experiment in Appendix~\ref{sec:appendix_noise_robustness_flash} is a separate diagnostic and is not pooled with this value analysis.
 
 \section{Detailed Probing Experiments and Robustness Analysis}
 \label{sec:appendix_detailed_probing}
