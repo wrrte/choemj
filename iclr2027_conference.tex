@@ -876,4 +876,20 @@ Prioritized Experience Replay uses TD-error to prioritize transitions \citep{sch
 
 FLASH's anchor score differs in two design choices. First, it uses the signed temporal difference between consecutive state values, $\Delta V_t = V(s_t)-V(s_{t-1})$, rather than absolute state value. This differs from the before-and-after-update value change used in Prioritized Sweeping: the two signals compare different states along a trajectory and different estimates of a state, respectively. Second, FLASH combines normalized TD-error and temporal value difference multiplicatively through ReLU and softplus, rather than the additive combination discussed for HVPER \citep{cao2019high}. The ReLU factor requires above-average TD-error for a positive score, while the softplus factor modulates the score according to value change. The exact formulation is given in Section~\ref{subsec:flash_retrieval}. Anchor selection is followed by retrieval of related contexts, whose contribution beyond anchor injection alone is evaluated in Appendix~\ref{sec:appendix_ablation_studies}.
 
+\section{AI use statement}
+
+Using LLM:
+Wrote and modified Python code to generate cropped images for probing
+
+Added logic to generate probing videos during training
+Analyzed existing code for storm, drama, twister, etc., and identified the locations of necessary logic
+
+WANDB log-related tasks
+
+Wrote Python code to generate heatmaps
+
+Python code to select evaluation scores from WANDB runs that meet specific conditions and export them to an xlsx file. Writing Python code to automatically incorporate the experimental results recorded in the xlsx file into the performance table within the paper’s TeX file
+Generating table formats during paper writing
+
+
 \end{document}
