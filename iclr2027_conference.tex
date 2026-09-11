@@ -297,8 +297,9 @@ FLASH shows substantial gains in \textit{Alien}, \textit{Frostbite}, and \textit
 Overall, the results show that the benefit of FLASH varies across environments.
 
 \subsection{Amplification of Successful Exploration}
+\label{subsec:exploitation_amplifier}
 
-We examine how successful training experiences translate into evaluation performance using one training run per method. For each method, we evaluate the final checkpoint at 100k environment steps with 20 evaluation seeds, running one episode per evaluation seed. Each point in the resulting distribution is therefore an individual evaluation episode return from a fixed checkpoint.
+We first illustrate how successful training experiences translate into evaluation performance using one training run per method. For each method, we evaluate the final checkpoint at 100k environment steps with 20 evaluation seeds, running one episode per evaluation seed. Each point in the resulting distribution is therefore an individual evaluation episode return from a fixed checkpoint. We complement this illustration with a separate analysis across training seeds in Frostbite below.
 
 \begin{figure}[!t]
 \centering
@@ -323,15 +324,9 @@ We examine how successful training experiences translate into evaluation perform
 \label{fig:exploitation_amplifier}
 \end{figure}
 
-Figure~\ref{fig:exploitation_amplifier}(a) shows that both selected training runs attain similarly high episode returns, while FLASH achieves higher evaluation scores in the later stages of training. The early divergence during the first half of training (retrieval warmup) is discussed in Appendix~\ref{sec:appendix_rng_divergence}. Panel (b) further shows that the final FLASH checkpoint yields higher median and upper-quartile episode returns across evaluation seeds. Together, these observations are consistent with more effective use of successful training experiences in the illustrated runs. The low-return points in panel (b) are individual evaluation outcomes of these trained checkpoints. Training runs that remain at low returns throughout learning constitute a separate failure to discover successful behavior; in our observations, the proportion of such training runs is unchanged by FLASH. The exploitation benefit examined here concerns evaluation performance after successful experiences have been encountered during training.
+Figure~\ref{fig:exploitation_amplifier}(a) shows that both selected training runs attain similarly high episode returns, while FLASH achieves higher evaluation scores in the later stages of training. The early divergence during the first half of training (retrieval warmup) is discussed in Appendix~\ref{sec:appendix_rng_divergence}. Panel (b) further shows that the final FLASH checkpoint yields higher median and upper-quartile episode returns across evaluation seeds. These observations are consistent with more effective use of successful training experiences in the illustrated runs. The low-return points in panel (b) are individual evaluation outcomes; they should be distinguished from training runs that never discover successful behavior.
 
-\todo{Across-seed protocol: Extend this analysis to all independent training seeds for each evaluated method and game, reporting the number of training runs separately from the 20 evaluation episodes per checkpoint. Use matched training budgets and evaluation schedules. Define a game-specific success criterion, such as a return threshold, before comparing methods and apply it identically to both. Report the fraction of training runs that ever succeed and the distribution of first-success times to substantiate the claim about unchanged discovery frequency. Distinguish first successes before and after retrieval warmup.}
-
-\todo{Best-training-return versus final-evaluation gap: For each training seed $i$, report $G_i = R^{\mathrm{train,best}}_i - \bar{R}^{\mathrm{eval}}_i(100\mathrm{k})$, where the first term is the maximum completed training episode return over the full budget and the second is the final checkpoint's mean evaluation return. Plot both returns for every training seed with an equality reference line, and report the gap distribution and between-method difference with bootstrap 95\% confidence intervals using training runs as the resampling unit. Document training/evaluation differences in action selection and episode termination. Interpret this gap as descriptive: the selected training maximum and evaluation mean are different statistics, and a smaller gap alone does not establish better exploitation.}
-
-\todo{Retention probability after first success: Record the environment step $t_i^{\mathrm{first}}$ at which each training run first meets the success criterion. At subsequent scheduled checkpoints, estimate the probability that an evaluation episode meets the same criterion. Align curves by environment steps since first success, average these probabilities equally across eligible training runs, and report uncertainty across training seeds, the final-checkpoint success probability, and the number of contributing runs at each offset. Report runs that never discover success separately; do not count them as post-success retention failures.}
-
-\todo{Time-to-consolidation: Prespecify a required evaluation success rate $q$ and a persistence requirement of $K$ consecutive evaluation checkpoints, shared by both methods. Measure the environment steps from first training success until this criterion is confirmed, and report the checkpoint interval, the consolidation fraction, and the time-to-consolidation distribution with uncertainty across training seeds. Treat successful training runs that do not consolidate by 100k as right-censored at their remaining post-success budget rather than dropping them or averaging only completed cases. Add a table and plots summarizing these metrics across seeds alongside the selected-run illustration, and limit conclusions to the observed comparisons.}
+To quantify this effect, we compare five matched training-seed pairs of STORM and STORM+FLASH in Frostbite, with 20 evaluation episodes per final checkpoint. These retrospective runs used a total budget of 100k environment steps. We define success by episode return $\geq 800$ and a low-return outcome by return $\leq 300$. In four seed pairs, both methods encountered success before FLASH retrieval activated at 50,000 steps. Across these four pairs, FLASH improves the final mean evaluation return in every seed, increasing the average from 2162.6 to 2402.8 ($+11.1\%$). Evaluation success increases from 90.0\% to 93.75\%, while low-return outcomes decrease from 8/80 to 5/80 episodes (10.0\% to 6.25\%). The low-return reduction varies across seeds, however, and its paired bootstrap 95\% confidence interval spans zero ($-13.75$ to $+5.00$ percentage points). Thus, these runs provide evidence of higher final evaluation returns after success has been encountered, while the evidence for a consistent reduction in low-return failures remains limited. Appendix~\ref{sec:appendix_exploitation} reports the per-seed results, training--evaluation gaps, and learning-event timings (Tables~\ref{tab:exploitation_seeds}--\ref{tab:exploitation_timing}).
 
 \subsection{Computational Analysis}
 FLASH retains the base model's encoder architecture while introducing additional computation for hash indexing, anchor selection, retrieval, and memory maintenance.
@@ -392,6 +387,98 @@ In this paper, we investigated whether downstream Actor-Critic learning can make
 \bibliographystyle{iclr2027_conference}
 
 \appendix
+
+\section{Across-Seed Analysis of Exploitation in Frostbite}
+\label{sec:appendix_exploitation}
+
+This appendix details the quantitative analysis in Section~\ref{subsec:exploitation_amplifier}. It is separate from the selected-run illustration in Figure~\ref{fig:exploitation_amplifier}. We use five matched training seeds (10, 710, 3710, 6000, and 6010), selecting the most recently created finished run with an evaluation for each seed and method, without ranking runs by their scores. STORM baselines are eligible regardless of creation date. The FLASH runs satisfy the fixed retrieval configuration: 50,000-step warmup, batch-size reduction by retrieved contexts, surprise threshold 3.5, target group size 12, and anchor weight 0.12; they were created after the EMA implementation cutoff of August 24, 2026, 11:05:43 UTC. Each selected run was trained for 100k environment steps and evaluated for 20 episodes at its final checkpoint. We verify the individual evaluation returns against the logged mean. These are 20 evaluation episodes per trained model, not 20 independent training runs.
+
+\paragraph{Success and analysis groups.}
+We use episode return $\geq 800$ as a score-based success criterion motivated by the approximately 800-point return associated with the first igloo completion in our observations. This is a proxy for successful behavior, rather than a direct detection of igloo completion. Low-return outcomes are defined separately by return $\leq 300$. Both thresholds are applied identically to both methods. We report all five seed pairs and, separately, the four pairs in which both methods encountered success before retrieval activation. This subgroup is defined using pre-activation training experience, rather than final evaluation performance. Seed 6010 never reached the success threshold under either method in the recorded training episodes and remains in the full-sample results.
+
+% Sources: STORM/results/frostbite_exploitation/run_metrics.csv and summary.csv.
+\begin{table}[!t]
+\centering
+\caption{Frostbite final evaluation results for all five training-seed pairs. Each success or low-return rate uses 20 evaluation episodes, so 5 percentage points correspond to one episode. ``Pre-50k'' indicates whether both methods encountered a training episode with return $\geq 800$ before retrieval activation. All checkpoints were evaluated after 100k training environment steps.}
+\label{tab:exploitation_seeds}
+\small
+\setlength{\tabcolsep}{4pt}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lrrrrrrc}
+\toprule
+& \multicolumn{2}{c}{Mean evaluation return} & \multicolumn{2}{c}{Success (\%)} & \multicolumn{2}{c}{Low return (\%)} & \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}
+Seed & STORM & +FLASH & STORM & +FLASH & STORM & +FLASH & Pre-50k \\
+\midrule
+10   & 2068.0 & 2206.0 & 95.0  & 90.0  & 5.0   & 10.0  & Yes \\
+710  & 2270.5 & 2601.0 & 100.0 & 95.0  & 0.0   & 5.0   & Yes \\
+3710 & 1904.0 & 2233.5 & 70.0  & 90.0  & 30.0  & 10.0  & Yes \\
+6000 & 2408.0 & 2570.5 & 95.0  & 100.0 & 5.0   & 0.0   & Yes \\
+6010 & 254.5  & 258.5  & 0.0   & 0.0   & 100.0 & 100.0 & No \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\paragraph{Aggregation and uncertainty.}
+We first summarize the 20 evaluation episodes within each training run, then give each training seed equal weight. Table~\ref{tab:exploitation_aggregate} reports differences between FLASH and STORM with percentile bootstrap 95\% confidence intervals obtained from 10,000 resamples of matched training-seed pairs (bootstrap seed 2027). The resampling unit is the training-seed pair; evaluation episodes are not treated as independent training runs. With only five pairs overall and four in the pre-activation-success subgroup, these intervals are exploratory estimates of uncertainty.
+
+\begin{table}[!t]
+\centering
+\caption{Aggregate Frostbite results. Differences are FLASH minus STORM; rate differences and their confidence intervals are in percentage points (pp). The gap is the maximum recorded training episode return minus the final mean evaluation return. Confidence intervals resample matched training-seed pairs.}
+\label{tab:exploitation_aggregate}
+\small
+\setlength{\tabcolsep}{4pt}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lrrrr}
+\toprule
+Metric & STORM & +FLASH & Difference & 95\% CI for difference \\
+\midrule
+\multicolumn{5}{l}{\textit{All five training-seed pairs}} \\
+Mean evaluation return & 1781.0 & 1973.9 & $+192.9$ & $[89.3,\,296.5]$ \\
+Mean best training return & 3152.0 & 2912.0 & $-240.0$ & $[-520.0,\,40.0]$ \\
+Mean training--evaluation gap & 1371.0 & 938.1 & $-432.9$ & $[-773.1,\,-92.7]$ \\
+Evaluation success (\%) & 72.00 & 75.00 & $+3.00$ pp & $[-4.00,\,12.00]$ pp \\
+Low-return outcomes (\%) & 28.00 & 25.00 & $-3.00$ pp & $[-12.00,\,4.00]$ pp \\
+\midrule
+\multicolumn{5}{l}{\textit{Four pairs with success in both methods before retrieval activation}} \\
+Mean evaluation return & 2162.6 & 2402.8 & $+240.1$ & $[150.3,\,330.0]$ \\
+Mean best training return & 3870.0 & 3570.0 & $-300.0$ & $[-580.0,\,37.5]$ \\
+Mean training--evaluation gap & 1707.4 & 1167.3 & $-540.1$ & $[-842.3,\,-118.9]$ \\
+Evaluation success (\%) & 90.00 & 93.75 & $+3.75$ pp & $[-5.00,\,13.75]$ pp \\
+Low-return outcomes (\%) & 10.00 & 6.25 & $-3.75$ pp & $[-13.75,\,5.00]$ pp \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\paragraph{Training--evaluation gap and final success reproduction.}
+For each training seed $i$, we compute $G_i = R_i^{\mathrm{train,best}} - \bar{R}_i^{\mathrm{eval}}$, using the maximum recorded training episode return and the final checkpoint's mean evaluation return. The average gap decreases in both analysis groups (Table~\ref{tab:exploitation_aggregate}). This is a descriptive statistic: the training maximum and evaluation mean differ in selection, and a lower training maximum also reduces the gap. Indeed, the mean best training return is lower under FLASH in these runs, so the gap reduction alone cannot establish more effective exploitation.
+
+The more consistent observation is that all four seed pairs with pre-activation success have higher final mean evaluation returns under FLASH. The reduction in low-return outcomes is less consistent: counts change from 1 to 2, 0 to 1, 6 to 2, and 1 to 0 for seeds 10, 710, 3710, and 6000, respectively. Thus, the net reduction from 8 to 5 low-return episodes is driven mainly by seed 3710. This supports reporting higher final returns after successful experience has been encountered, while limiting claims about uniform improvements in success reproduction or failure avoidance.
+
+\paragraph{First success and training-based consolidation.}
+We identify first success from completed training episodes. As a supplementary measure, we define training-based consolidation as the end of the first complete window of 10 training episodes, starting no earlier than the first successful episode, in which at least 8 episodes meet the success threshold. Elapsed time is measured from first success to that window's end. Environment steps are reconstructed from episode lengths and checked against replay-buffer lengths, rather than equating the W\&B logging index with environment steps.
+
+Table~\ref{tab:exploitation_timing} shows that first success and this consolidation criterion occur at identical steps in the two methods for each of the four successful seed pairs. Both events precede retrieval activation. Consequently, this particular consolidation measure does not demonstrate a speedup attributable to FLASH. Seed 6010 never succeeds, so its consolidation time is undefined. Successful runs that did not consolidate before training ended would be treated as right-censored; none occur in this sample. These retrospective runs contain only final checkpoint evaluations, so they do not support measuring consolidation of intermediate evaluation performance.
+
+\begin{table}[!t]
+\centering
+\caption{Learning-event timings in Frostbite, in environment steps. For each listed seed, STORM and STORM+FLASH have identical first-success and training-consolidation timings, so a single value is shown for both methods. All observed events precede FLASH activation at 50,000 steps. Dashes denote no successful training episode and hence an undefined consolidation time.}
+\label{tab:exploitation_timing}
+\small
+\begin{tabular}{lrrr}
+\toprule
+Seed & First success & Training consolidation & Steps from first success \\
+\midrule
+10   & 17,172 & 29,169 & 11,997 \\
+710  & 14,036 & 40,916 & 26,880 \\
+3710 & 14,173 & 21,448 & 7,275 \\
+6000 & 13,206 & 38,545 & 25,339 \\
+6010 & --- & --- & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \section{Implementation Details: Early Trajectory Divergence during Warmup}
 \label{sec:appendix_rng_divergence}
