@@ -176,20 +176,20 @@ For each retrieved group $\mathcal{N}_a$, we extract the preceding $L$-step cont
 where $N_{\text{rand}} = \max\big(0,\, N_{\text{total}} - N_{\text{ret}}\big)$, and $N_{\text{total}}$ is the base imagination batch size. We choose $M$ and $n$ such that $Mn \leq N_{\text{total}}$. Since each of the at most $M$ anchor groups contains at most $n$ contexts (including the anchor), $N_{\text{ret}} \leq Mn \leq N_{\text{total}}$. Consequently, $N_{\text{rand}} + N_{\text{ret}} = N_{\text{total}}$, so substituting retrieved contexts for random samples strictly preserves the physical batch size.
 
 \paragraph{Group Weighting.}
-To prevent any single anchor group from dominating the gradient, each member within group $\mathcal{N}_a$ receives an \textbf{inverse-group weight} $w_j = 1/|\mathcal{N}_a|$, while every random sample receives $w=1$. Consequently, the total effective weight sum across the augmented batch becomes:
+To prevent any single anchor group from dominating the gradient, each member within group $\mathcal{N}_a$ receives an \textbf{inverse-group weight} $w_j = 1/|\mathcal{N}_a|$, while every random sample receives $w=1$. The unnormalized batch weight is:
 \begin{equation}
-W_{\text{sum}} = N_{\text{rand}} + M_{\text{valid}} < N_{\text{total}},
+W_{\text{sum}} = N_{\text{rand}} + M_{\text{valid}} \leq N_{\text{total}},
 \label{eq:weight_sum}
 \end{equation}
-where $M_{\text{valid}}$ is the number of valid anchor groups. Because $N_{\text{ret}} > M_{\text{valid}}$ (due to the inclusion of neighbor contexts), $W_{\text{sum}}$ is intentionally reduced below the original base batch size $N_{\text{total}}$.
+where $M_{\text{valid}}$ is the number of valid anchor groups. The inequality is strict when at least one group contains more than one context.
 
-All Actor-Critic losses (policy, value, and entropy) are normalized by this reduced sum $W_{\text{sum}}$:
+All Actor-Critic losses (policy, value, and entropy) are normalized by $W_{\text{sum}}$:
 \begin{equation}
 \mathcal{L}_{\text{AC}} = \frac{1}{W_{\text{sum}}} \sum_{i \in \mathcal{D}_{\text{imagine}}} w_i \left[\mathcal{L}_{\text{actor}}(s_i, a_i) + \mathcal{L}_{\text{critic}}(s_i) - \beta \, \mathcal{H}(\pi(\cdot | s_i))\right].
 \label{eq:weighted_loss}
 \end{equation}
 
-We evaluate this adjustment through comparisons with a variant that preserves the original total weight and a baseline with a reduced random batch (Appendix~\ref{sec:appendix_ablation_weight}).
+We compare alternative batch constructions in Appendix~\ref{sec:appendix_ablation_weight}.
 
 \paragraph{Retrieval Warmup.}
 In our experiments, we set the retrieval warmup to $T_{\text{warm}} = T/2 = 50,000$ environment steps, half of the total training budget of $T = 100,000$ environment steps. This count includes the initial replay-buffer collection phase. During warmup, once the replay buffer is ready, world-model and Actor-Critic training proceed on their usual schedules, and the EMA statistics accumulate, but no anchors are registered and no retrieval occurs. Actor-Critic training uses randomly sampled contexts during this phase. This prevents noisy early-stage value estimates from corrupting the anchor selection process. In STORM, an initial Global Rebuild is performed at the last policy-training step before warmup ends to prepare the index for retrieval. Anchor registration and retrieval are activated for the second half of training ($t \geq T_{\text{warm}}$).
@@ -400,13 +400,11 @@ Additionally, this hardware-level asynchrony provides a strong justification for
     \label{fig:ram_misalignment}
 \end{figure}
 
-\section{Ablation on Batch Weight Reduction}
+\section{Ablation on Batch Composition}
 \label{sec:appendix_ablation_weight}
-As detailed in Section~\ref{subsec:flash_learning}, our method computes the number of random samples as $N_{\text{rand}} = \max(0, N_{\text{total}} - N_{\text{ret}})$. When combined with inverse-group weighting, this effectively reduces the total weight of the batch $W_{\text{sum}}$ to a value strictly smaller than the base batch size $N_{\text{total}}$.
+We compare two choices of $N_{\text{rand}}$ while keeping the same group weighting and normalizing both losses by their respective $W_{\text{sum}}$. Our default construction uses $N_{\text{rand}} = \max(0, N_{\text{total}} - N_{\text{ret}})$, as described in Section~\ref{subsec:flash_learning}, keeping the physical batch size at $N_{\text{total}}$. The alternative subtracts only the number of valid groups: $N_{\text{rand}} = \max(0, N_{\text{total}} - M_{\text{valid}})$. This gives $W_{\text{sum}} = N_{\text{total}}$ and a physical batch size of $N_{\text{total}} + N_{\text{ret}} - M_{\text{valid}}$.
 
-To validate this design, we evaluated a variant where we only subtracted the number of valid anchors instead of the total retrieved contexts: $N_{\text{rand}} = \max(0, N_{\text{total}} - M_{\text{valid}})$. This alternative perfectly preserves the original total batch weight of $N_{\text{total}}$. However, we observed a significant performance degradation (\todo{자세한 성능 하락 언급}). We hypothesize that because FLASH provides highly focused, directional signals, it substantially accelerates the Actor-Critic optimization. Maintaining the full batch weight causes the Actor-Critic to learn too rapidly, disrupting the synchronization with the World Model's representation learning.
-
-Furthermore, one might ask: \textit{"Does the performance improve simply because the overall batch size is reduced?"} To test this, we ran a standard baseline where $N_{\text{total}}$ was artificially reduced (e.g., from 1024 to 1000) without any retrieval mechanism. This naive reduction did not yield the performance improvements seen with FLASH, confirming that the success of FLASH stems from the high-quality retrieved contexts and the balanced learning speed, rather than merely a smaller batch size.
+The default construction achieved higher performance than the alternative (\todo{Report per-environment scores and variation across training seeds for both batch constructions.}). As an additional control, we evaluated the baseline with a smaller imagination batch (e.g., reducing $N_{\text{total}}$ from 1024 to 1000) without retrieval. This reduction did not reproduce the performance gains observed with FLASH.
 
 
 
