@@ -1,7 +1,9 @@
 import torch
 import random
 import numpy as np
+import copy
 from collections import deque
+from training_branches import parse_retrieval_mode
 
 class FastHashBucket:
     """O(N) 병목을 제거하고 완전한 O(1) 연산을 지원하는 딕셔너리 기반 해시 버킷"""
@@ -66,11 +68,16 @@ class FastHashBucket:
 
 
 class RetrievalContextManager:
+    _state_fields = ("hash_proj", "hash_mean", "ema_mean", "ema_var", "ema_vd_mean",
+                     "ema_vd_var", "hash_memory", "index_to_bucket", "prev_v",
+                     "prev_keys", "active_anchors")
+
     def __init__(self, num_envs, config, latent_dim, device="cuda"):
         self.num_envs = num_envs
         self.config = config
         self.device = device
-        self.enabled = bool(config.get("enable", True))
+        self.mode = parse_retrieval_mode(config.get("enable", False))
+        self.enabled = self.mode is not False
         self.threshold = float(config.get("threshold", 1.0))
         self.context_length = int(config.get("context_length", 8))
         self.max_bucket_size = int(config.get("max_bucket_size", 512))
@@ -110,6 +117,34 @@ class RetrievalContextManager:
         
         self.active_anchors = deque()
 
+    def state_dict(self):
+        """Portable retrieval state, including warmup statistics and hash memory."""
+        return {name: (getattr(self, name).detach().cpu().clone()
+                       if isinstance(getattr(self, name), torch.Tensor)
+                       else copy.deepcopy(getattr(self, name))) for name in self._state_fields}
+
+    def load_state_dict(self, state):
+        # Keep the receiving branch's enable flag and device.
+        for name in self._state_fields:
+            if name in state:
+                value = state[name]
+                setattr(self, name, value.to(self.device) if isinstance(value, torch.Tensor)
+                        else copy.deepcopy(value))
+
+    def _valid_context(self, replay_buffer, pointer, env_idx):
+        if hasattr(replay_buffer, "is_valid_context"):
+            return replay_buffer.is_valid_context(pointer, env_idx, self.context_length)
+        capacity = replay_buffer.max_length // replay_buffer.num_envs
+        length = min(replay_buffer.length, capacity)
+        if not 0 <= env_idx < replay_buffer.num_envs or not 0 <= pointer < capacity:
+            return False
+        oldest = (replay_buffer.last_pointer + 1) % capacity if length == capacity else 0
+        position = (pointer - oldest) % capacity
+        if position >= length or position + 1 < self.context_length:
+            return False
+        return all(replay_buffer.termination_buffer[(pointer - step) % capacity, env_idx] <= 0.5
+                   for step in range(1, self.context_length))
+
     def _hash_keys(self, latent):
         if latent.numel() == 0:
             return []
@@ -124,8 +159,8 @@ class RetrievalContextManager:
         return keys.detach().cpu().tolist()
 
     def add_batch_transitions(self, v_t, reward, termination, gamma, base_indexes, base_envs, max_buf_len, skip_len=8, is_warmup=False):
-        if not self.enabled:
-            return 0, 0
+        if not self.enabled or skip_len < 1 or v_t.shape[1] <= skip_len + 1:
+            return 0
             
         v_t_eval = v_t[:, skip_len:]
         reward_eval = reward[:, skip_len:].squeeze(-1) if reward.dim() == 3 else reward[:, skip_len:]
@@ -144,7 +179,7 @@ class RetrievalContextManager:
         
         valid_mask_1d = torch.from_numpy(base_envs != -1).to(delta_v_raw.device)
         if not valid_mask_1d.any():
-            return 0, 0
+            return 0
             
         valid_mask_2d = valid_mask_1d.unsqueeze(1).expand_as(delta_v_raw)
         env_indices_full = torch.from_numpy(base_envs).to(delta_v_raw.device)
@@ -276,13 +311,17 @@ class RetrievalContextManager:
                 
         self.index_to_bucket[idx_tuple] = key
 
-    def retrieve_contexts(self, replay_buffer, world_model, max_anchors, multiplier=5, target=5, max_contexts=256):
+    def retrieve_contexts(self, replay_buffer, world_model, max_anchors, multiplier=5, target=5, max_contexts=256, return_indices=False):
         """
         Pops up to `max_anchors` from `active_anchors` and retrieves up to max contexts in total.
         Implements lazy recomputation using single frame encoding.
         """
-        if not self.enabled or len(self.active_anchors) == 0:
-            return None, None, 0, 0.0, [], 0
+        if hasattr(replay_buffer, "retrieval_view"):
+            replay_buffer = replay_buffer.retrieval_view()
+        def result(*values, indices=None):
+            return (*values, indices or []) if return_indices else values
+        if not self.enabled or len(self.active_anchors) == 0 or max_contexts <= 0:
+            return result(None, None, 0, 0.0, [], 0)
             
         popped_anchors = []
         for _ in range(min(max_anchors, len(self.active_anchors))):
@@ -301,6 +340,8 @@ class RetrievalContextManager:
         for anchor_tuple, anchor_key in popped_anchors:
             # anchor_tuple is (anchor_ptr, env_idx)
             anchor_ptr, anchor_env_idx = anchor_tuple
+            if not self._valid_context(replay_buffer, anchor_ptr, anchor_env_idx):
+                continue
             queue = self.hash_memory.get(anchor_key)
             if not queue:
                 continue
@@ -311,9 +352,7 @@ class RetrievalContextManager:
             valid_sampled = []
             for (p, env_idx) in sampled_indices:
                 curr_p = p % max_buf_len
-                if not replay_buffer.store_on_gpu and p < 0 and replay_buffer.length < max_buf_len:
-                    continue
-                if replay_buffer.length < self.context_length:
+                if not self._valid_context(replay_buffer, p, env_idx):
                     continue
                 obs_list.append(replay_buffer.obs_buffer[curr_p, env_idx:env_idx+1])
                 valid_sampled.append((p, env_idx))
@@ -324,7 +363,7 @@ class RetrievalContextManager:
                 else:
                     import numpy as np
                     obs_arr = np.concatenate(obs_list, axis=0)
-                    obs_tensor = torch.from_numpy(obs_arr).float().cuda() / 255.0
+                    obs_tensor = torch.from_numpy(obs_arr).to(self.device).float() / 255.0
                     
                 from einops import rearrange
                 obs_tensor = rearrange(obs_tensor, "N H W C -> N 1 C H W")
@@ -368,6 +407,7 @@ class RetrievalContextManager:
         retrieved_obs_list = []
         retrieved_action_list = []
         retrieved_weights = []
+        retrieved_indices = []
         valid_anchors_count = 0
         
         for group in final_anchor_groups:
@@ -376,16 +416,9 @@ class RetrievalContextManager:
             valid_is_anchor = []
             
             for idx, (p, env_idx) in enumerate(group):
-                valid = True
+                valid = self._valid_context(replay_buffer, p, env_idx)
                 obs_chunk = []
                 action_chunk = []
-                for step in range(self.context_length - 1, -1, -1):
-                    curr_p = (p - step) % max_buf_len
-                    term = replay_buffer.termination_buffer[curr_p, env_idx]
-                    if step > 0 and term > 0.5:
-                        valid = False
-                        break
-                        
                 if valid:
                     for step in range(self.context_length - 1, -1, -1):
                         curr_p = (p - step) % max_buf_len
@@ -403,6 +436,7 @@ class RetrievalContextManager:
                     valid_group_obs.append(obs_tensor)
                     valid_group_action.append(action_tensor)
                     valid_is_anchor.append(idx == 0)
+                    retrieved_indices.append((p, env_idx))
                 
             if valid_group_obs:
                 valid_anchors_count += 1
@@ -426,7 +460,7 @@ class RetrievalContextManager:
                 
         avg_hit_rate = total_hit_rate / max(1, num_hit_rate_samples)
         if len(retrieved_obs_list) == 0:
-            return None, None, candidates_before_max, avg_hit_rate, [], 0
+            return result(None, None, candidates_before_max, avg_hit_rate, [], 0)
             
         if replay_buffer.store_on_gpu:
             ret_obs = torch.cat(retrieved_obs_list, dim=1).float() / 255.0
@@ -436,13 +470,13 @@ class RetrievalContextManager:
         else:
             import numpy as np
             ret_obs = np.concatenate(retrieved_obs_list, axis=1)
-            ret_obs = torch.from_numpy(ret_obs).float().cuda() / 255.0
+            ret_obs = torch.from_numpy(ret_obs).to(self.device).float() / 255.0
             from einops import rearrange
             ret_obs = rearrange(ret_obs, "T B H W C -> B T C H W")
             ret_action = np.concatenate(retrieved_action_list, axis=1)
-            ret_action = torch.from_numpy(ret_action).cuda().transpose(0, 1) # [B, T]
+            ret_action = torch.from_numpy(ret_action).to(self.device).transpose(0, 1) # [B, T, ...]
             
-        return ret_obs, ret_action, candidates_before_max, avg_hit_rate, retrieved_weights, valid_anchors_count
+        return result(ret_obs, ret_action, candidates_before_max, avg_hit_rate, retrieved_weights, valid_anchors_count, indices=retrieved_indices)
 
     @torch.no_grad()
     def rebuild_all_hash_buckets(self, replay_buffer, world_model, chunk_size=8192):
@@ -450,6 +484,10 @@ class RetrievalContextManager:
         Clears all hash buckets and re-hashes all valid transitions in the replay buffer 
         using the latest world model to fix representation drift (Global Rebuild).
         """
+        if not self.enabled:
+            return
+        if hasattr(replay_buffer, "retrieval_view"):
+            replay_buffer = replay_buffer.retrieval_view()
         self.hash_memory.clear()
         self.index_to_bucket.clear()
         
@@ -485,7 +523,7 @@ class RetrievalContextManager:
             else:
                 import numpy as np
                 obs_arr = np.concatenate(obs_list, axis=0)
-                obs_tensor = torch.from_numpy(obs_arr).float().cuda() / 255.0
+                obs_tensor = torch.from_numpy(obs_arr).to(self.device).float() / 255.0
                 
             from einops import rearrange
             obs_tensor = rearrange(obs_tensor, "N H W C -> N 1 C H W")
@@ -525,4 +563,3 @@ class RetrievalContextManager:
             self._insert_into_bucket(p, env_idx, key)
                 
         print(f"[Retrieval] Global Rebuild completed. Re-hashed {valid_len * replay_buffer.num_envs} frames (PCA: {self.use_pca}).")
-
