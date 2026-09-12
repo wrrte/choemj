@@ -27,3 +27,9 @@ miniconda3/
 .bashrc
 .bash_profile
 .tmux.conf
+.codex/
+.copilot/
+.dotnet/
+.vscode-server/
+.wget-hsts
+Miniconda3-latest-Linux-x86_64.sh
