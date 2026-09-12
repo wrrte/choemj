@@ -115,28 +115,28 @@ To assess prediction accuracy, we detached the pre-trained encoder and trained a
 
 However, when we injected extreme uniform noise into the background spaces while leaving only the target bounding box intact, the classification accuracy plummeted drastically (e.g., from $99.6\%$ to $68.1\%$ in Seaquest). This drop indicates that the encoder--probe pipeline is sensitive to background corruption. It is consistent with spatial entanglement, but extreme noise also introduces a distribution shift, so this experiment alone does not isolate the cause of the degradation.
 
-Crucially, cosine differences indicate representational sensitivity, whereas the high clean probing accuracy provides more direct evidence that supervised probes can predict the evaluated task variables from the latent states. These findings do not establish that all semantic information is preserved or that spatial entanglement is the sole bottleneck. They nevertheless suggest that poor reconstruction alone is insufficient to diagnose missing task-relevant information, motivating interventions that help downstream learners use the information available in these representations.
+Crucially, cosine differences indicate representational sensitivity, whereas the high clean probing accuracy provides more direct evidence that supervised probes can predict the evaluated task variables from the latent states. These findings do not establish that all semantic information is preserved or that spatial entanglement is the sole bottleneck. Nevertheless, They suggest that poor reconstruction alone is insufficient to diagnose missing task-relevant information, motivating interventions that help downstream learners use the information available in these representations.
 
 \subsection{The Actor-Critic Optimization as an Intervention Point}
 \label{subsec:ac_intervention}
 Having found that supervised probes can predict selected task-relevant variables from latent states, we investigate whether downstream Actor-Critic optimization can better exploit this available information while retaining the lightweight encoder architecture. Successful prediction by a supervised probe does not establish that policy and value learning will learn to extract or use the same information from reward-driven training signals. This motivates studying the experiences presented to the Actor-Critic as an additional intervention point.
 
-Specifically, FLASH retrieves structurally similar historical experiences around salient learning events and groups them within the same training batch. We hypothesize that this targeted reuse can help the learner distinguish contexts with different return targets and reinforce useful behavior. This is a hypothesis about improving downstream utilization, rather than evidence that Actor-Critic optimization is the sole source of performance limitations.
+Specifically, FLASH retrieves structurally similar historical experiences around salient learning events and groups them within the same training batch. We hypothesize that this targeted reuse can help the learner distinguish contexts with different return targets and reinforce useful behavior.
 
 \section{METHODOLOGY}
 \label{sec:method}
 
-FLASH maintains a lightweight episodic memory indexed by Locality-Sensitive Hashing (LSH), selects anchors using a surprise score, and retrieves structurally similar past contexts to augment Actor-Critic training batches. We describe the method in three parts: memory indexing and maintenance (Section~\ref{subsec:flash_memory}), anchor selection and retrieval (Section~\ref{subsec:flash_retrieval}), and integration into Actor-Critic learning (Section~\ref{subsec:flash_learning}). Algorithm~\ref{alg:flash} summarizes the execution order, and Figure~\ref{fig:flash_pipeline} illustrates the overall architecture.
+FLASH maintains a lightweight episodic memory indexed by hashing, selects anchors using a surprise score, and retrieves structurally similar past contexts to augment Actor-Critic training batches. We describe the method in three parts: memory indexing and maintenance (Section~\ref{subsec:flash_memory}), anchor selection and retrieval (Section~\ref{subsec:flash_retrieval}), and integration into Actor-Critic learning (Section~\ref{subsec:flash_learning}). Algorithm~\ref{alg:flash} summarizes the execution order, and Figure~\ref{fig:flash_pipeline} illustrates the overall architecture.
 
 \subsection{Hash-Indexed Episodic Memory}
 \label{subsec:flash_memory}
 
-At every environment step, the world model observation encoder and posterior head, jointly denoted by $f_\theta$, map a single observation $o_t$ to a flattened posterior categorical probability vector $z_t = f_\theta(o_t) \in [0,1]^{d}$, where $d = K \times C$ with $K$ categorical variables each of $C$ classes. Specifically, STORM converts posterior logits to probabilities via softmax and applies \textit{unimix} (1\% uniform mixing), yielding $z_t = \operatorname{vec}(0.99\,\operatorname{softmax}(\ell_t) + 0.01/C)$, where $\ell_t \in \mathbb{R}^{K \times C}$ contains the raw posterior logits, softmax is applied over the $C$ classes of each variable, and $K=C=32$. Thus, hashing uses the resulting probabilities, rather than logits or sampled one-hot latent states, and excludes the world model's temporal hidden state. The same probability representation is used for insertion, re-verification, and Global Rebuild. We apply an LSH function $h: \mathbb{R}^d \to \{0,1,\ldots,2^B{-}1\}$ to produce a discrete hash key:
+During regular training after base-agent initialization, the world model observation encoder and posterior head, jointly denoted by $f_\theta$, map a single observation $o_t$ to a flattened posterior categorical probability vector $z_t = f_\theta(o_t) \in [0,1]^{d}$, where $d = K \times C$ with $K$ categorical variables each of $C$ classes. Specifically, STORM converts posterior logits to probabilities via softmax and applies \textit{unimix} (1\% uniform mixing), yielding $z_t = \operatorname{vec}(0.99\,\operatorname{softmax}(\ell_t) + 0.01/C)$, where $\ell_t \in \mathbb{R}^{K \times C}$ contains the raw posterior logits, softmax is applied over the $C$ classes of each variable, and $K=C=32$. Thus, hashing uses the resulting probabilities, rather than logits or sampled one-hot latent states, and excludes the world model's temporal hidden state. The same probability representation is used for insertion, re-verification, and Global Rebuild. We apply an hash function $h: \mathbb{R}^d \to \{0,1,\ldots,2^B{-}1\}$ to produce a discrete hash key:
 \begin{equation}
 h(z_t) = \sum_{i=1}^{B} \mathbf{1}\!\left[\left(W_{\text{proj}}^\top (z_t - \mu)\right)_i > 0\right] \cdot 2^{i-1},
 \label{eq:lsh}
 \end{equation}
-where $B$ is the number of hash bits, $\mu$ is the centering vector (initially $\mathbf{0}$), and $W_{\text{proj}} \in \mathbb{R}^{d \times B}$ is the projection matrix (initially a random Gaussian projection). During \textit{Global Rebuild} (described below), both are updated via PCA on the current buffer's latent distribution to align the hash hyperplanes with the principal axes of variation.
+where $B$ is the number of hash bits, $\mu$ is the centering vector (initially $\mathbf{0}$, yielding a standard random-hyperplane Locality Sensitive Hashing scheme), and $W_{\text{proj}} \in \mathbb{R}^{d \times B}$ is the projection matrix (initially a random Gaussian projection). During \textit{Global Rebuild} (described below), both are updated via PCA on the current buffer's latent distribution to align the hash hyperplanes with the principal axes of variation.
 
 Each transition pointer $(p_t, e)$ (where $p_t$ is the circular buffer index and $e$ is the environment index) is inserted into a hash bucket $\mathcal{B}_{h(z_t)}$. If a pointer's hash key changes (due to Global Rebuild), it is transparently migrated.
 
@@ -156,12 +156,12 @@ where $r_t$ is the reward, $\gamma$ is the discount factor, and $d_t$ is the ter
 \bar{\mu}_e &\leftarrow (1-\alpha)\bar{\mu}_e + \alpha \cdot \mathbb{E}[\delta^{\text{TD}}_{e}], \quad
 \bar{\sigma}^2_e \leftarrow (1-\alpha)\bar{\sigma}^2_e + \alpha \cdot \text{Var}[\delta^{\text{TD}}_{e}], \label{eq:ema_update}
 \end{align}
-and analogously for $\Delta V$. At each training step, we compute the surprise score $S_u$ using the EMA statistics from preceding batches, then update the statistics with the current batch, including during warmup. The surprise score is:
+and analogously for $\Delta V$. For each time step $t$ in the sampled trajectories, we compute the surprise score $S_t$ using the EMA statistics from preceding batches. We then update the statistics with the current batch, including during warmup. The surprise score is:
 \begin{equation}
 S_t = \text{ReLU}\!\left(\frac{\delta^{\text{TD}}_t - \bar{\mu}_e}{\sqrt{\bar{\sigma}^2_e} + \epsilon}\right) \cdot \text{softplus}\!\left(\frac{\Delta V_t - \bar{\mu}^{V}_e}{\sqrt{\bar{\sigma}^{2,V}_e} + \epsilon}\right).
 \label{eq:surprise}
 \end{equation}
-By pairing a strict ReLU with a softplus, this formulation guarantees that it will never fire unless the TD-error is above average, regardless of how much the value spikes. Conversely, an extremely large TD-error can still trigger the anchor even if the value decreases slightly. This captures precisely the pivotal moments where a highly surprising or high-reward sub-trajectory is first discovered. For each trajectory sequence in the batch, when the maximum surprise score across its time steps exceeds the threshold ($\max_{t \in \text{seq}} S_t > \tau_z$), the corresponding buffer pointer (offset backwards by $\Delta_{\text{anchor}}$ steps to capture the critical preceding actions that caused the surprise; see Appendix~\ref{sec:appendix_causal_anchor} for architectural details) is registered as an \textit{active anchor} $a = (p_{t^*+\Delta_\text{anchor}},\, e)$ where $t^* = \text{argmax}_{t \in \text{seq}} S_t$, in a FIFO queue $\mathcal{A}$.
+By pairing a strict ReLU with a softplus, this formulation guarantees that it will never fire unless the TD-error is above average, regardless of how much the value spikes. Conversely, an extremely large TD-error can still trigger the anchor even if the value decreases slightly. This captures the pivotal moments where a highly surprising or high-reward sub-trajectory is first discovered. For each trajectory sequence in the batch, when the maximum surprise score across its time steps exceeds the threshold ($\max_{t \in \text{seq}} S_t > \tau_z$), the corresponding buffer pointer (offset backwards by $\Delta_{\text{anchor}}$ steps to capture the critical preceding actions that caused the surprise; see Appendix~\ref{sec:appendix_causal_anchor} for architectural details) is registered as an \textit{active anchor} $a = (p_{t^*+\Delta_\text{anchor}},\, e)$ where $t^* = \text{argmax}_{t \in \text{seq}} S_t$, in a FIFO queue $\mathcal{A}$.
 
 \paragraph{Neighbor Retrieval and Re-verification.}
 At each imagination step (where the agent generates imagined trajectories for policy training), FLASH pops up to $M$ anchors from $\mathcal{A}$. For each anchor $a$ with stored hash key $k_a$, we sample up to $m \times (n{-}1)$ candidate pointers from bucket $\mathcal{B}_{k_a}$ (excluding the anchor itself). To combat \textit{representation drift} (the gradual shift in hash keys as $f_\theta$ evolves), we perform \textbf{lazy re-verification}: each candidate's single-frame observation is re-encoded through the \textit{current} world model, and only candidates whose re-computed hash key matches $k_a$ are retained. This yields a set of verified neighbors $\mathcal{N}_a$ with $|\mathcal{N}_a| \leq n$, including the anchor itself. The re-verification hit rate is used to trigger the memory maintenance procedure in Section~\ref{subsec:flash_memory}.
@@ -194,24 +194,24 @@ All Actor-Critic losses (policy, value, and entropy) are normalized by $W_{\text
 We compare alternative batch constructions in Appendix~\ref{sec:appendix_ablation_weight}.
 
 \paragraph{Retrieval Warmup.}
-In our experiments, we set the retrieval warmup to $T_{\text{warm}} = T/2 = 50,000$ environment steps, half of the total training budget of $T = 100,000$ environment steps. This count includes the initial replay-buffer collection phase. During warmup, once the replay buffer is ready, world-model and Actor-Critic training proceed on their usual schedules, and the EMA statistics accumulate, but no anchors are registered and no retrieval occurs. Actor-Critic training uses randomly sampled contexts during this phase. This prevents noisy early-stage value estimates from corrupting the anchor selection process. In STORM, an initial Global Rebuild is performed at the last policy-training step before warmup ends to prepare the index for retrieval. Anchor registration and retrieval are activated for the second half of training ($t \geq T_{\text{warm}}$).
+In our experiments, we set the retrieval warmup to $T_{\text{warm}} = T/2 = 50,000$ environment steps, half of the total training budget of $T = 100,000$ environment steps. This count includes the base-agent initialization phase ($0 \leq t < T_{\text{init}}$). The base-agent initialization horizon $T_{\text{init}}$ follows the initialization protocol of the underlying agent and is distinct from FLASH's retrieval warmup $T_{\text{warm}}$. During warmup, once the replay buffer is ready, world-model and Actor-Critic training proceed on their usual schedules, and the EMA statistics accumulate, but no anchors are registered and no retrieval occurs. Actor-Critic training uses randomly sampled contexts during this phase. This prevents noisy early-stage value estimates from corrupting the anchor selection process. In STORM, an initial Global Rebuild is performed at the last policy-training step before warmup ends to prepare the index for retrieval. Anchor registration and retrieval are activated for the second half of training ($t \geq T_{\text{warm}}$).
 
 \begin{algorithm}[t]
 \caption{FLASH: Fast Latent Anchor Search with Hashing}
 \label{alg:flash}
 \begin{algorithmic}[1]
 \REQUIRE Base agent, replay buffer $\mathcal{R}$, FLASH parameters from Section~\ref{sec:method} with $Mn \leq N_{\text{total}}$
-\REQUIRE Initial collection steps $T_{\text{init}}$ sufficient for replay sampling, total steps $T$, retrieval warmup $T_{\text{warm}} = T/2$
+\REQUIRE Base-agent initialization horizon $T_{\text{init}}$, total steps $T$, retrieval warmup $T_{\text{warm}} = T/2$
 \STATE Initialize hash buckets, anchor queue $\mathcal{A}$, and EMA statistics
 \FOR{$t = 0,\ldots,T_{\text{init}}-1$}
-    \STATE Collect a transition with a uniformly random action into $\mathcal{R}$
+    \STATE Collect a transition into $\mathcal{R}$ following the base agent's initialization procedure
 \ENDFOR
 \FOR{$t = T_{\text{init}},\ldots,T-1$}
     \STATE Collect a transition into $\mathcal{R}$ and update the hash index (Section~\ref{subsec:flash_memory})
     \STATE Sample a replay batch and update the world model
-    \STATE Compute \textit{surprise} $S_u$ with existing EMA, then update EMA (Eq.~\eqref{eq:surprise})
+    \STATE Compute surprise scores $S_u$ for each step $u$ in the sampled sequences using the existing EMA, then update EMA (Eq.~\ref{eq:surprise})
     \IF{$t \geq T_{\text{warm}}$}
-        \STATE Register an anchor for each sequence with $\max_{u \in \text{seq}} S_u > \tau_z$
+        \STATE Register an anchor for each sequence with $\max_{u \in \mathrm{seq}} S_u > \tau_z$
     \ENDIF
     \STATE Initialize retrieved groups to $\emptyset$
     \IF{$t \geq T_{\text{warm}}$}
@@ -228,7 +228,7 @@ In our experiments, we set the retrieval warmup to $T_{\text{warm}} = T/2 = 50,0
 \begin{figure}[t]
 \centering
 \includegraphics[width=\textwidth]{pipeline.pdf}
-\caption{Overview of the FLASH pipeline. \textbf{(Left)} During environment interaction, each observation is processed by the encoder and projector to generate a discrete binary hash, which is registered in a hash bucket. \textbf{(Right)} Triggered anchors and target states retrieve structurally similar frames with matching hashes from the hash bucket. These grouped experiences serve as the basis for imagination, naturally clustering structurally aliased past experiences together.}
+\caption{Overview of the FLASH pipeline. \textbf{(Left)} During environment interaction, each observation is processed by the encoder and projector to generate a discrete binary hash, which is registered in a hash bucket. \textbf{(Right)} Triggered anchors during world model training and target states retrieve structurally similar frames with matching hashes from the hash bucket. These grouped experiences serve as the basis for imagination, naturally clustering structurally aliased past experiences together.}
 \label{fig:flash_pipeline}
 \end{figure}
 
@@ -237,7 +237,7 @@ In our experiments, we set the retrieval warmup to $T_{\text{warm}} = T/2 = 50,0
 \label{sec:experiments}
 
 \subsection{Experimental Setup}
-We evaluate our method across all 26 games of the Atari 100k benchmark. \todo{다섯 시드로 각각 학습을 수행하여, 각 학습 마다 20개의 시드에서 평가를 함. 이 100개의 결과를 평균내어 특정 모델의 한 게임에 대한 성능을 구함}
+We evaluate our method across all 26 games of the Atari 100k benchmark. \todo{네 시드로 각각 학습을 수행하여, 각 학습 마다 20개의 시드에서 평가를 함. 이 100개의 결과를 평균내어 특정 모델의 한 게임에 대한 성능을 구함. 각 Flash 적용-미적용 쌍은 같은 GPU의 같은 가상환경, 같은 시드로 평가. 자세한 방법은 부록에서 설명(부록에서 예시 들어서 자세히 설명. 한 게임에서 GPU를 다르게 쓸 순 있지만 항상 페어는 맞췄다고. 예시를 들고.)}
 
 \subsection{Main Performance}
 Table~\ref{tab:main_performance} presents the comprehensive Atari 100k results. 
@@ -293,7 +293,7 @@ Our evaluation reveals that FLASH yields substantial improvements in several env
 
 FLASH shows substantial gains in \textit{Alien}, \textit{Frostbite}, and \textit{Qbert}. These results demonstrate the utility of targeted experience reuse in the evaluated runs. We assess the contribution of retrieval through ablations in Section~\ref{subsec:ablation_main}, rather than attributing the differences across games to a specific gradient or disentanglement mechanism.
 
-\todo{그래도 일단 특정 지표와 비례한 성능 증가를 통한 분석 정도는 넣는 게 좋지 않을까?}
+\todo{그래도 일단 특정 지표와 비례한 성능 증가를 통한 분석 정도는 넣는 게 좋지 않을까? 그리고 분석 좀 수정하기}
 
 Overall, the results show that the benefit of FLASH varies across environments.
 
@@ -368,7 +368,7 @@ FLASH increases the mean Spearman correlation from $0.0756$ to $0.1622$, with an
 
 \subsection{Ablation Studies}
 \label{subsec:ablation_main}
-To validate the core components of our approach, we conducted ablation studies targeting the retrieval mechanism and the triggering condition. First, removing the \textit{Retrieval} process (using only the trigger) results in a severe performance drop, supporting the utility of retrieving related contexts beyond prioritizing the selected anchor alone. Second, using \textit{Absolute Value} instead of temporal Value Difference causes excessive redundant triggering in high-reward plateaus, confirming the necessity of targeting sharp value inflection points. Finally, utilizing an \textit{Additive} combination instead of our Multiplicative trigger leads to frequent false positives caused by noisy TD-errors, validating our logical AND-like formulation. Comprehensive details and quantitative results for these ablations are provided in Appendix \ref{sec:appendix_ablation_studies}.
+To validate the core components of our approach, we conducted ablation studies targeting the retrieval mechanism and the triggering condition. First, removing the \textit{Retrieval} process (using only the trigger) results in a performance drop, supporting the utility of retrieving related contexts beyond prioritizing the selected anchor alone. Second, using \textit{Absolute Value} instead of temporal Value Difference causes excessive redundant triggering in high-reward plateaus, confirming the necessity of targeting sharp value inflection points. Finally, utilizing an \textit{Additive} combination instead of our Multiplicative trigger leads to frequent false positives caused by noisy TD-errors, validating our logical AND-like formulation. Comprehensive details and quantitative results for these ablations are provided in Appendix \ref{sec:appendix_ablation_studies}.
 
 \section{Conclusion}
 \label{sec:conclusion}
@@ -847,13 +847,17 @@ To isolate and validate the impact of the core components introduced in FLASH, w
 \subsection{Ablation 1: The Role of Retrieval (In-batch Injection)}
 In this setting, we preserve the exact triggering condition of FLASH ($\text{ReLU(TD-error)} \times \text{Softplus(Value Difference)}$) but completely disable the subsequent retrieval mechanism. When a pivotal anchor is triggered, it is injected into the training batch alone, without pulling in structurally similar historical states from the hash buckets. The observed performance drop supports the utility of retrieving structurally similar historical contexts in addition to the selected anchor. In the evaluated setting, anchor injection alone does not reproduce the performance of the full method.
 
+\todo{Include comprehensive tables and graphs detailing the specific quantitative performance metrics across the evaluated environments for this ablation.}
+
 \subsection{Ablation 2: Value Difference vs. Absolute Value}
 Here, we replace the temporal value difference ($|V(s_t) - V(s_{t-1})|$) in the triggering condition with the absolute state value ($V(s_t)$). Using the absolute value causes the anchor mechanism to trigger continuously once the agent enters a high-reward phase, leading to redundant sampling and a loss of focus. The temporal difference ensures that FLASH specifically targets the pivotal moments of value spikes, focusing anchor selection on changes in the estimated value.
+
+\todo{Include comprehensive tables and graphs detailing the specific quantitative performance metrics across the evaluated environments for this ablation.}
 
 \subsection{Ablation 3: Multiplicative vs. Additive Combination}
 In this ablation, we substitute our multiplicative trigger condition with an additive linear combination, similar to prior works like HVPER: $\lambda \cdot \text{TD-error} + (1-\lambda) \cdot \text{Value Difference}$. The additive approach is prone to false positives; a massive TD-error caused by environmental noise can trigger an anchor even if there is zero value difference. Our multiplicative formulation effectively acts as a logical AND gate, suppressing these noisy false positives and ensuring that only truly pivotal learning moments are retrieved.
 
-\todo{Include comprehensive tables and graphs detailing the specific quantitative performance metrics across the evaluated environments for these three ablations.}
+\todo{Include comprehensive tables and graphs detailing the specific quantitative performance metrics across the evaluated environments for this ablation.}
 
 \section{Extended Related Work}
 \label{sec:appendix_related_work}
