@@ -1,4 +1,4 @@
-"""CPU regressions for shared Retrieval and concurrent post-warmup branches.
+"""CPU regressions for shared Retrieval and sequential post-warmup branches.
 
 Run with a Python environment containing torch and einops::
 
@@ -15,9 +15,11 @@ import importlib.util
 import json
 import random
 import os
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -36,6 +38,7 @@ from training_branches import (
     launch_training_branches,
     parse_retrieval_mode,
     restore_rng_state,
+    save_final_models,
     split_retrieval_override,
 )
 
@@ -510,6 +513,7 @@ class DramaTrainingContractTests(unittest.TestCase):
             "RetrievalContextManager": RetrievalContextManager,
             "retrieval_warmup": load_train_function("retrieval_warmup"),
             "save_branch_checkpoint": checkpoint_helpers.save_branch_checkpoint,
+            "save_final_models": save_final_models,
             "capture_rng_state": capture_rng_state,
             "restore_rng_state": restore_rng_state,
         })
@@ -523,7 +527,8 @@ class DramaTrainingContractTests(unittest.TestCase):
             self.assertEqual(buffer.length, 3)
             self.assertEqual(buffer.termination_buffer[2], 0)
             self.assertTrue(buffer.episode_end_buffer[2])
-            for mode in [True, False]:
+            final_weights = {}
+            for mode in [False, True]:
                 branch_buffer = make_drama_buffer(continuous=False)
                 branch_buffer.world_model_warmup_length = 100
                 branch_buffer.behaviour_warmup_length = 100
@@ -532,9 +537,16 @@ class DramaTrainingContractTests(unittest.TestCase):
                 self.assertEqual(state["next_step"], 3)
                 branch_config = copy.deepcopy(config)
                 branch_config.JointTrainAgent.Retrieval["enable"] = mode
-                train(branch_config, directory, branch_buffer, world, agent, mock.Mock(), resume_state=state, resume_rng=rng)
+                logdir = Path(directory) / ("on" if mode else "off")
+                train(branch_config, logdir, branch_buffer, world, agent, mock.Mock(), resume_state=state, resume_rng=rng)
                 self.assertEqual(environments[-1].steps, 2)
                 self.assertEqual(branch_buffer.length, 5)
+                final_weights[mode] = (logdir / "ckpt" / "world_model.pth").read_bytes()
+                saved = torch.load(logdir / "ckpt" / "world_model.pth", weights_only=True)
+                tree_equal(self, world.state_dict(), saved)
+                completion = json.loads((logdir / "ckpt" / "training_complete.json").read_text())
+                self.assertEqual(completion["next_step"], 5)
+            self.assertEqual((Path(directory) / "off" / "ckpt" / "world_model.pth").read_bytes(), final_weights[False])
 
     def test_fixed_warmup_switches_at_requested_step_and_dynamic_state_resumes(self):
         warmup = load_train_function("retrieval_warmup")
@@ -733,63 +745,127 @@ class BranchSupervisorTests(unittest.TestCase):
             self.assertEqual(args[:3], [sys.executable, str(ROOT / "training_branches.py"), "--supervise"])
             manifest = json.loads(Path(args[3]).read_text())
             self.assertEqual(manifest["commands"], {"retrieval_on": enabled, "retrieval_off": disabled})
+            self.assertEqual(manifest["execution_order"], ["retrieval_off", "retrieval_on"])
 
-    def test_children_run_concurrently_from_same_saved_state(self):
+    def test_children_run_false_then_true_from_same_unchanged_saved_state(self):
         with tempfile.TemporaryDirectory() as directory:
-            (Path(directory) / "shared.json").write_text(json.dumps({"next_step": 101, "optimizer_updates": 17}))
+            shared = Path(directory) / "shared.json"
+            original = json.dumps({"next_step": 101, "optimizer_updates": 17})
+            shared.write_text(original)
             child = "\n".join([
                 "import json, pathlib, sys, time",
-                "name, peer = sys.argv[1:]",
+                "name = sys.argv[1]",
                 "state = json.loads(pathlib.Path('shared.json').read_text())",
-                "pathlib.Path(name + '.ready').write_text('ready')",
-                "deadline = time.monotonic() + 3",
-                "while not pathlib.Path(peer + '.ready').exists():",
-                "    if time.monotonic() >= deadline: raise SystemExit(23)",
-                "    time.sleep(0.01)",
-                "state['completed_step'] = state.pop('next_step')",
+                "if name == 'on':",
+                "    assert pathlib.Path('off.json').exists()",
+                "    assert not pathlib.Path('off.running').exists()",
+                "    progress = json.loads(pathlib.Path('branch_results.json').read_text())",
+                "    assert progress['exit_codes']['retrieval_off'] == 0",
+                "    assert progress['active_branch'] == 'retrieval_on'",
+                "else:",
+                "    assert not pathlib.Path('on.json').exists()",
+                "pathlib.Path(name + '.running').touch()",
+                "time.sleep(0.05)",
+                "state['initial_step'] = state['next_step']",
+                "state['next_step'] += 100",
                 "state['optimizer_updates'] += 1",
                 "pathlib.Path(name + '.json').write_text(json.dumps(state))",
+                "pathlib.Path(name + '.running').unlink()",
             ])
             manifest = self.write_manifest(directory, {
-                "retrieval_on": [sys.executable, "-c", child, "on", "off"],
-                "retrieval_off": [sys.executable, "-c", child, "off", "on"],
+                "retrieval_on": [sys.executable, "-c", child, "on"],
+                "retrieval_off": [sys.executable, "-c", child, "off"],
             })
             result = self.run_supervisor(manifest)
             self.assertEqual(result.returncode, 0, result.stderr)
             on = json.loads((Path(directory) / "on.json").read_text())
             off = json.loads((Path(directory) / "off.json").read_text())
-            self.assertEqual(on, {"completed_step": 101, "optimizer_updates": 18})
+            self.assertEqual(on, {"initial_step": 101, "next_step": 201, "optimizer_updates": 18})
             self.assertEqual(on, off)
+            self.assertEqual(shared.read_text(), original)
             summary = json.loads((Path(directory) / "branch_results.json").read_text())
             self.assertEqual(summary["exit_codes"], {"retrieval_on": 0, "retrieval_off": 0})
 
-    def test_failed_branch_stops_and_reaps_running_sibling(self):
+    def test_failed_false_does_not_start_true(self):
         with tempfile.TemporaryDirectory() as directory:
-            waiting_child = "\n".join([
-                "import pathlib, time",
-                "pathlib.Path('started').write_text('ready')",
-                "time.sleep(4)",
-                "pathlib.Path('should_not_finish').write_text('failure')",
-            ])
-            failing_child = "\n".join([
-                "import pathlib, time",
-                "deadline = time.monotonic() + 3",
-                "while not pathlib.Path('started').exists():",
-                "    if time.monotonic() >= deadline: raise SystemExit(24)",
-                "    time.sleep(0.01)",
-                "raise SystemExit(7)",
-            ])
             manifest = self.write_manifest(directory, {
-                "retrieval_on": [sys.executable, "-c", waiting_child],
-                "retrieval_off": [sys.executable, "-c", failing_child],
+                "retrieval_on": [sys.executable, "-c", "from pathlib import Path; Path('on.started').touch()"],
+                "retrieval_off": [sys.executable, "-c", "raise SystemExit(7)"],
             })
             result = self.run_supervisor(manifest)
             self.assertEqual(result.returncode, 7, result.stderr)
-            self.assertFalse((Path(directory) / "should_not_finish").exists())
+            self.assertFalse((Path(directory) / "on.started").exists())
             summary = json.loads((Path(directory) / "branch_results.json").read_text())
             self.assertEqual(summary["supervisor_exit_code"], 7)
-            self.assertEqual(summary["exit_codes"]["retrieval_off"], 7)
-            self.assertLess(summary["exit_codes"]["retrieval_on"], 0)
+            self.assertEqual(summary["exit_codes"], {"retrieval_off": 7})
+
+    def test_true_failure_preserves_completed_false(self):
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = self.write_manifest(directory, {
+                "retrieval_off": [sys.executable, "-c", "from pathlib import Path; Path('off.weights').write_bytes(b'final-false')"],
+                "retrieval_on": [sys.executable, "-c", "raise SystemExit(9)"],
+            })
+            result = self.run_supervisor(manifest)
+            self.assertEqual(result.returncode, 9, result.stderr)
+            self.assertEqual((Path(directory) / "off.weights").read_bytes(), b"final-false")
+            summary = json.loads((Path(directory) / "branch_results.json").read_text())
+            self.assertEqual(summary["exit_codes"], {"retrieval_off": 0, "retrieval_on": 9})
+
+    def test_interrupt_during_true_preserves_false_and_shared_checkpoint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "shared.weights").write_bytes(b"warmup-state")
+            manifest = self.write_manifest(directory, {
+                "retrieval_off": [sys.executable, "-c", "from pathlib import Path; Path('off.weights').write_bytes(b'final-false')"],
+                "retrieval_on": [sys.executable, "-c", "from pathlib import Path; import time; assert Path('off.weights').exists(); Path('on.started').touch(); time.sleep(30)"],
+            })
+            process = subprocess.Popen([sys.executable, str(ROOT / "training_branches.py"), "--supervise", str(manifest)],
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                deadline = time.monotonic() + 5
+                while not (root / "on.started").exists() and process.poll() is None and time.monotonic() < deadline:
+                    time.sleep(.01)
+                self.assertTrue((root / "on.started").exists())
+                progress = json.loads((root / "branch_results.json").read_text())
+                self.assertEqual(progress["exit_codes"], {"retrieval_off": 0})
+                process.terminate()
+                process.communicate(timeout=5)
+                self.assertEqual(process.returncode, 128 + signal.SIGTERM)
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                    process.communicate(timeout=5)
+            self.assertEqual((root / "off.weights").read_bytes(), b"final-false")
+            self.assertEqual((root / "shared.weights").read_bytes(), b"warmup-state")
+            summary = json.loads((root / "branch_results.json").read_text())
+            self.assertEqual(summary["exit_codes"]["retrieval_off"], 0)
+            self.assertEqual(summary["exit_codes"]["retrieval_on"], -signal.SIGTERM)
+
+
+class FinalModelTests(unittest.TestCase):
+    def test_final_weights_and_completion_marker_are_saved_for_both_projects(self):
+        with tempfile.TemporaryDirectory() as directory:
+            world, agent = TinyTrainable(), TinyTrainable()
+            world.update_once()
+            for name, filenames in [("storm", ("world_model_final.pth", "agent_final.pth")),
+                                    ("drama", ("world_model.pth", "agent.pth"))]:
+                target = Path(directory) / name
+                save_final_models(target, world, agent, 103, filenames=filenames)
+                tree_equal(self, world.state_dict(), torch.load(target / filenames[0], weights_only=True))
+                tree_equal(self, agent.state_dict(), torch.load(target / filenames[1], weights_only=True))
+                self.assertEqual(json.loads((target / "training_complete.json").read_text())["next_step"], 103)
+
+    def test_interrupted_true_save_does_not_modify_false_weights(self):
+        with tempfile.TemporaryDirectory() as directory:
+            world, agent = TinyTrainable(), TinyTrainable()
+            target = Path(directory) / "off"
+            save_final_models(target, world, agent, 103)
+            before = {path.name: path.read_bytes() for path in target.iterdir()}
+            with mock.patch.object(torch, "save", side_effect=KeyboardInterrupt):
+                with self.assertRaises(KeyboardInterrupt):
+                    save_final_models(Path(directory) / "on", world, agent, 104)
+            self.assertEqual({path.name: path.read_bytes() for path in target.iterdir()}, before)
+            self.assertFalse((Path(directory) / "on" / "training_complete.json").exists())
 
 
 if __name__ == "__main__":

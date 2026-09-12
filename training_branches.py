@@ -2,7 +2,7 @@
 
 The training process writes one checkpoint and execs this module's lightweight
 supervisor. Replacing that process releases its entire CUDA context before the
-two independent Python training processes start on the inherited GPU devices.
+independent Python training processes run one at a time: False, then True.
 """
 
 import argparse
@@ -72,7 +72,7 @@ def restore_rng_state(state):
 
 
 def launch_training_branches(checkpoint_dir, enabled_command, disabled_command):
-    """Replace this process with a supervisor of two fresh training processes.
+    """Replace this process with a supervisor that runs False, then True.
 
     Callers must close environments and flush/close loggers first. Each command
     must explicitly select its boolean branch so a child cannot branch again.
@@ -81,15 +81,41 @@ def launch_training_branches(checkpoint_dir, enabled_command, disabled_command):
     checkpoint_dir = Path(checkpoint_dir).resolve()
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     manifest = checkpoint_dir / "branches.json"
-    manifest.write_text(json.dumps({
+    _write_json(manifest, {
         "checkpoint_dir": str(checkpoint_dir),
         "cwd": os.getcwd(),
+        "execution_order": ["retrieval_off", "retrieval_on"],
         "commands": {"retrieval_on": list(enabled_command), "retrieval_off": list(disabled_command)},
-    }, indent=2) + "\n", encoding="utf-8")
-    print(f"Starting concurrent Retrieval True/False branches from {checkpoint_dir}", flush=True)
+    })
+    print(f"Starting sequential Retrieval False -> True runs from {checkpoint_dir}", flush=True)
     sys.stdout.flush()
     sys.stderr.flush()
     os.execv(sys.executable, [sys.executable, str(Path(__file__).resolve()), "--supervise", str(manifest)])
+
+
+def _write_json(path, value):
+    """Keep the last complete status file if interrupted while writing."""
+    path = Path(path)
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def save_final_models(directory, world_model, agent, next_step,
+                      filenames=("world_model_final.pth", "agent_final.pth")):
+    """Save final weights independently of periodic saves before a run exits."""
+    import torch
+
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    for model, filename in zip((world_model, agent), filenames):
+        path = directory / filename
+        temporary = path.with_name(path.name + ".tmp")
+        torch.save(model.state_dict(), temporary)
+        os.replace(temporary, path)
+    _write_json(directory / "training_complete.json", {
+        "next_step": next_step, "world_model": filenames[0], "agent": filenames[1],
+    })
 
 
 def _stop_processes(processes):
@@ -113,11 +139,21 @@ def _stop_processes(processes):
 
 
 def run_branch_supervisor(manifest_path):
-    """Launch both branches concurrently and propagate failures/interrupts."""
+    """Finish False before starting True, each from the untouched warmup state."""
     manifest_path = Path(manifest_path)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     processes = {}
     exit_codes = {}
+    order = ("retrieval_off", "retrieval_on")
+    current_process = None
+    active_branch = None
+
+    def record_progress(status, result=None):
+        _write_json(manifest_path.parent / "branch_results.json", {
+            "execution_order": list(order), "exit_codes": exit_codes,
+            "active_branch": active_branch, "status": status,
+            "supervisor_exit_code": result,
+        })
 
     def interrupted(signum, _frame):
         raise KeyboardInterrupt(signum)
@@ -125,22 +161,24 @@ def run_branch_supervisor(manifest_path):
     previous_handlers = {sig: signal.signal(sig, interrupted) for sig in (signal.SIGINT, signal.SIGTERM)}
     result = 0
     try:
-        for name, command in manifest["commands"].items():
-            processes[name] = subprocess.Popen(command, cwd=manifest["cwd"], start_new_session=True)
-        while len(exit_codes) < len(processes):
-            for name, process in processes.items():
-                if name in exit_codes:
-                    continue
-                code = process.poll()
-                if code is None:
-                    continue
-                exit_codes[name] = code
-                if code:
-                    print(f"{name} failed with exit code {code}; stopping the other branch.", file=sys.stderr, flush=True)
-                    result = code if code > 0 else 128 - code
-                    return result
-            if len(exit_codes) < len(processes):
-                time.sleep(0.1)
+        # Use a fixed order even for manifests created by the former concurrent launcher.
+        for name in order:
+            active_branch = name
+            record_progress("running")
+            print(f"Starting {name} from the shared warmup checkpoint", flush=True)
+            current_process = subprocess.Popen(manifest["commands"][name], cwd=manifest["cwd"], start_new_session=True)
+            processes[name] = current_process
+            code = current_process.wait()
+            exit_codes[name] = code
+            _stop_processes([current_process])
+            current_process = None
+            active_branch = None
+            # Persist False's success before True can start or be interrupted.
+            record_progress("running")
+            if code:
+                print(f"{name} failed with exit code {code}; stopping the sequence.", file=sys.stderr, flush=True)
+                result = code if code > 0 else 128 - code
+                return result
         return 0
     except KeyboardInterrupt as error:
         signum = error.args[0] if error.args and isinstance(error.args[0], int) else signal.SIGINT
@@ -153,12 +191,11 @@ def run_branch_supervisor(manifest_path):
         # Ignore repeated shutdown signals while reaping subprocesses.
         for sig in previous_handlers:
             signal.signal(sig, signal.SIG_IGN)
-        _stop_processes(processes.values())
+        if current_process is not None:
+            _stop_processes([current_process])
+        active_branch = None
         exit_codes.update({name: process.returncode for name, process in processes.items()})
-        (manifest_path.parent / "branch_results.json").write_text(
-            json.dumps({"exit_codes": exit_codes, "supervisor_exit_code": result}, indent=2) + "\n",
-            encoding="utf-8",
-        )
+        record_progress("completed" if result == 0 else "failed", result)
         for sig, handler in previous_handlers.items():
             signal.signal(sig, handler)
 
