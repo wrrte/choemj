@@ -237,7 +237,9 @@ In our experiments, we set the retrieval warmup to $T_{\text{warm}} = T/2 = 50,0
 \label{sec:experiments}
 
 \subsection{Experimental Setup}
-We evaluate our method across all 26 games of the Atari 100k benchmark. \todo{네 시드로 각각 학습을 수행하여, 각 학습 마다 20개의 시드에서 평가를 함. 이 100개의 결과를 평균내어 특정 모델의 한 게임에 대한 성능을 구함. 각 Flash 적용-미적용 쌍은 같은 GPU의 같은 가상환경, 같은 시드로 평가. 자세한 방법은 부록에서 설명(부록에서 예시 들어서 자세히 설명. 한 게임에서 GPU를 다르게 쓸 순 있지만 항상 페어는 맞췄다고. 예시를 들고.)}
+We evaluate our method across all 26 games of the Atari 100k benchmark. For each game and method, we train four independent runs with different training seeds and evaluate each final checkpoint over 20 evaluation seeds. We first average the 20 evaluation returns within each training run and then report the mean across the four training seeds, giving each training run equal weight. For each training seed, the baseline and FLASH-augmented agents are run on the same GPU under the same software environment, and are evaluated using the same set of evaluation seeds. This paired protocol minimizes variation due to hardware, software, and evaluation randomness. Further details of the evaluation protocol and hardware assignment are provided in Appendix~X.
+
+\todo{add appendix and refer}
 
 \subsection{Main Performance}
 Table~\ref{tab:main_performance} presents the comprehensive Atari 100k results. 
@@ -252,27 +254,27 @@ Table~\ref{tab:main_performance} presents the comprehensive Atari 100k results.
 \toprule
 Game & Random & Human & STORM & STORM+ours & DRAMA & DRAMA+ours & EDELINE & EDELINE+ours \\
 \midrule
-Alien         & 227.8 & 7127.7 & 1041.8 & \textcolor{blue}{1091.1} & - & - & - & -  \\
-Amidar        & 5.8 & 1719.5 & 175.9 & \textcolor{red}{150.5} & - & - & - & -  \\
-Assault       & 222.4 & 742.0 & 662.7 & \textcolor{blue}{723} & - & - & - & -  \\
+Alien         & 227.8 & 7127.7 & 1041.8 & \textcolor{blue}{1091.1} & 787.5 & 792.5 & - & -  \\
+Amidar        & 5.8 & 1719.5 & 175.9 & \textcolor{red}{150.5} & 162 & 131 & - & -  \\
+Assault       & 222.4 & 742.0 & 643.7 & \textcolor{blue}{693.0} & 336 & 630 & - & -  \\
 Asterix       & 210.0 & 8503.3 & 546.2 & \textcolor{blue}{572.5} & - & - & - & -  \\
 BankHeist     & 14.2 & 753.1 & 163 & \textcolor{blue}{169.5} & - & - & - & -  \\
-BattleZone    & 2360.0 & 37187.5 & 10575 & \textcolor{blue}{10608.3} & - & - & - & -  \\
+BattleZone    & 2360.0 & 37187.5 & 10575 & \textcolor{blue}{10608.3} & 13000 & 10000 & - & -  \\
 Boxing        & 0.1 & 12.1 & 74.8 & \textcolor{blue}{77.3} & - & - & - & -  \\
 Breakout      & 1.7 & 30.5 & 11.7 & \textcolor{blue}{12.4} & - & - & - & -  \\
 ChopperCommand & 811.0 & 7387.8 & 1598.3 & \textcolor{red}{\textbf{1225}} & - & - & - & -  \\
 CrazyClimber  & 10780.5 & 35829.4 & 57571.7 & \textcolor{blue}{57908.3} & - & - & - & -  \\
 DemonAttack   & 152.1 & 1971.0 & 193 & \textcolor{red}{171.5} & - & - & - & -  \\
 Freeway       & 0.0 & 29.6 & - & - & - & - & - & -  \\
-Frostbite     & 65.2 & 4334.7 & 1807.5 & \textcolor{blue}{2059.5} & - & - & - & -  \\
+Frostbite     & 65.2 & 4334.7 & 1807.5 & \textcolor{blue}{2059.5} & 250 & 250 & - & -  \\
 Gopher        & 257.6 & 2412.5 & 3747 & \textcolor{red}{3578} & - & - & - & -  \\
 Hero          & 1027.0 & 30826.4 & 13178 & \textcolor{blue}{13269.4} & - & - & - & -  \\
 Jamesbond     & 29.0 & 302.8 & - & - & - & - & - & -  \\
 Kangaroo      & 52.0 & 3035.0 & 1620 & \textcolor{blue}{1675} & - & - & - & -  \\
-Krull         & 1598.0 & 2665.5 & 5608 & \textcolor{blue}{5915.2} & - & - & - & -  \\
+Krull         & 1598.0 & 2665.5 & 5608 & \textcolor{blue}{5915.2} & 10350 & 10250 & - & -  \\
 KungFuMaster  & 258.5 & 22736.3 & 25137.5 & \textcolor{blue}{25177.5} & - & - & - & -  \\
 MsPacman      & 307.3 & 6951.6 & - & - & - & - & - & -  \\
-Pong          & -20.7 & 14.6 & 5.7 & \textcolor{blue}{\textbf{9.8}} & - & - & - & -  \\
+Pong          & -20.7 & 14.6 & 6.5 & \textcolor{blue}{\textbf{10.8}} & - & - & - & -  \\
 PrivateEye    & 24.9 & 69571.3 & - & - & - & - & - & -  \\
 Qbert         & 163.9 & 13455.0 & 2875.2 & \textcolor{blue}{2920.2} & - & - & - & -  \\
 RoadRunner    & 11.5 & 7845.0 & - & - & - & - & - & -  \\
@@ -280,10 +282,10 @@ Seaquest      & 68.4 & 42054.7 & - & - & - & - & - & -  \\
 UpNDown       & 533.4 & 11693.2 & 5022 & \textcolor{blue}{5225.2} & - & - & - & -  \\
 \midrule
 \#Superhuman ($\uparrow$) & 0 & N/A & 5  & 5 & -  & -  & -  & -  \\
-Mean ($\uparrow$) & 0.000 & 1.000 & 0.965  & \textcolor{blue}{1.002} & -  & -  & -  & -  \\
+Mean ($\uparrow$) & 0.000 & 1.000 & 0.964  & \textcolor{blue}{1.000} & -  & -  & -  & -  \\
 Median ($\uparrow$) & 0.000 & 1.000 & 0.405  & \textcolor{blue}{0.416} & -  & -  & -  & -  \\
-IQM ($\uparrow$) & 0.000 & 1.000 & 0.433  & \textcolor{blue}{0.470} & -  & -  & -  & -  \\
-Optimality Gap ($\downarrow$) & 1.000 & 0.000 & 0.514  & \textcolor{blue}{0.499} & -  & -  & -  & -  \\
+IQM ($\uparrow$) & 0.000 & 1.000 & 0.431  & \textcolor{blue}{0.467} & -  & -  & -  & -  \\
+Optimality Gap ($\downarrow$) & 1.000 & 0.000 & 0.514  & \textcolor{blue}{0.500} & -  & -  & -  & -  \\
 \bottomrule
 \end{tabular}
 }
@@ -292,8 +294,6 @@ Optimality Gap ($\downarrow$) & 1.000 & 0.000 & 0.514  & \textcolor{blue}{0.499}
 Our evaluation reveals that FLASH yields substantial improvements in several environments (e.g., Alien, Frostbite, Qbert), while delivering modest but consistent performance gains across most other games.
 
 FLASH shows substantial gains in \textit{Alien}, \textit{Frostbite}, and \textit{Qbert}. These results demonstrate the utility of targeted experience reuse in the evaluated runs. We assess the contribution of retrieval through ablations in Section~\ref{subsec:ablation_main}, rather than attributing the differences across games to a specific gradient or disentanglement mechanism.
-
-\todo{그래도 일단 특정 지표와 비례한 성능 증가를 통한 분석 정도는 넣는 게 좋지 않을까? 그리고 분석 좀 수정하기}
 
 Overall, the results show that the benefit of FLASH varies across environments.
 
@@ -478,7 +478,7 @@ As observed in our learning curves (e.g., Figure \ref{fig:exploitation_amplifier
 \section{Implementation Details: Causal Offset in Anchor Registration}
 \label{sec:appendix_causal_anchor}
 In our implementation based on STORM, the world model relies on a prior that predicts the current state based on observations up to the previous time step ($t-1$). Consequently, an abrupt spike in the value estimate or a large TD-error at step $t$ is heavily influenced by the transition dynamics resulting from the action taken at step $t-2$. To ensure that the retrieved context accurately encapsulates this causal action rather than just the resultant state, we specifically set the anchor offset to $\Delta_{\text{anchor}} = -2$. This shifts the retrieval anchor back to the precise moment the agent committed to the pivotal decision.
-\todo{storm 말고 다른 모델(drama 등)에서의 offset도 언급하기}
+\todo{mention offsets in other models (such as dramas) as well}
 
 \section{Irreducible Probing Error due to RAM-Render Misalignment}
 \label{sec:appendix_ram_misalignment}
