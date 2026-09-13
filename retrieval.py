@@ -158,7 +158,7 @@ class RetrievalContextManager:
         keys = (bits.to(torch.int64) * self.hash_bit_values).sum(dim=-1)
         return keys.detach().cpu().tolist()
 
-    def add_batch_transitions(self, v_t, reward, termination, gamma, base_indexes, base_envs, max_buf_len, skip_len=8, is_warmup=False):
+    def add_batch_transitions(self, v_t, reward, termination, gamma, base_indexes, base_envs, max_buf_len, skip_len=8, is_warmup=False, transition_mask=None):
         if not self.enabled or skip_len < 1 or v_t.shape[1] <= skip_len + 1:
             return 0
             
@@ -182,6 +182,10 @@ class RetrievalContextManager:
             return 0
             
         valid_mask_2d = valid_mask_1d.unsqueeze(1).expand_as(delta_v_raw)
+        # Optional [B, T-1] mask excludes reset edges and unavailable contexts.
+        if transition_mask is not None:
+            valid_mask_2d = valid_mask_2d & transition_mask[:, skip_len:].to(
+                device=delta_v_raw.device, dtype=torch.bool)
         env_indices_full = torch.from_numpy(base_envs).to(delta_v_raw.device)
         
         abs_delta_v = torch.abs(delta_v_raw)
@@ -488,6 +492,9 @@ class RetrievalContextManager:
             return
         if hasattr(replay_buffer, "retrieval_view"):
             replay_buffer = replay_buffer.retrieval_view()
+        if hasattr(replay_buffer, "rebuild_hash_buckets"):
+            replay_buffer.rebuild_hash_buckets(self, world_model, chunk_size)
+            return
         self.hash_memory.clear()
         self.index_to_bucket.clear()
         
