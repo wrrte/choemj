@@ -33,3 +33,9 @@ miniconda3/
 .vscode-server/
 .wget-hsts
 Miniconda3-latest-Linux-x86_64.sh
+.local/
+.vscode-server/
+.bash_logout
+.lesshst
+.profile
+.zshrc
