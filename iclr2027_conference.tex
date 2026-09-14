@@ -36,7 +36,7 @@
 \maketitle
 
 \begin{abstract}
-Recent advancements in Reinforcement Learning (RL) have heavily adopted Diffusion-based models to improve visual representations, but they suffer from prohibitive computational costs. In this paper, we investigate whether this heavy generative approach is the only solution. While prior work assumes that compact visual representations discard fine-grained details, we revisit this assumption. Our probing experiments show that lightweight encoders can retain substantial task-relevant information despite poor visual reconstruction. These findings suggest that poor reconstruction alone does not establish the absence of task-relevant information, motivating interventions that improve how downstream Actor-Critic learners use the available representations. Building on this, we demonstrate that augmenting the Actor-Critic optimization process is a effective way to distinguish aliased states. To this end, we propose FLASH (Fast Latent Anchor Search with Hashing), an efficient retrieval module that implicitly supports Actor-Critic learning by selecting anchors based on a surprise score and augmenting training batches with these anchors and similar past experiences. By improving downstream discrimination between aliased states, FLASH acts as a versatile plug-and-play module that improves the overall performance of the evaluated baselines without altering their underlying encoders, confirming that heavy generative models are not strictly necessary and acting as a powerful exploitation amplifier.
+Recent advancements in Reinforcement Learning (RL) have heavily adopted Diffusion-based models to improve visual representations, but they suffer from prohibitive computational costs. In this paper, we investigate whether this heavy generative approach is the only solution. While prior work assumes that compact visual representations discard fine-grained details, we revisit this assumption. Our probing experiments show that lightweight encoders can retain substantial task-relevant information despite poor visual reconstruction. These findings suggest that poor reconstruction alone does not establish the absence of task-relevant information, motivating interventions that improve how downstream Actor-Critic learners use the available representations. Building on this, we demonstrate that augmenting the Actor-Critic optimization process is a effective way to distinguish aliased states. To this end, we propose FLASH), an efficient retrieval module that implicitly supports Actor-Critic learning by selecting anchors based on a surprise score and augmenting training batches with these anchors and similar past experiences. By improving downstream discrimination between aliased states, FLASH acts as a versatile plug-and-play module that improves the overall performance of the evaluated baselines without altering their underlying encoders, confirming that heavy generative models are not strictly necessary and acting as a powerful exploitation amplifier.
 \end{abstract}
 
 \section{Introduction}
@@ -54,7 +54,7 @@ Accurate prediction by a supervised probe, however, does not guarantee effective
 
 Our contributions are threefold:
 \begin{itemize}
-    \item First, we use diagnostic probing to assess whether lightweight encoder representations retain task-relevant information despite poor visual reconstruction, finding that supervised probes predict selected task variables from latent states with high accuracy under clean observations.
+    \item First, we use diagnostic probing to assess whether lightweight encoder representations retain task-relevant information despite poor visual reconstruction, finding that supervised probes predict selected task variables from latent states with high accuracy under clean observations (Section \ref{sec:representation}).
     \item Second, motivated by this evidence, we investigate downstream Actor-Critic optimization as a way to better utilize the available representations without replacing the encoder with a heavier model.
     \item Finally, we propose FLASH, a plug-and-play retrieval mechanism that groups structurally similar past experiences within the same Actor-Critic training batch, without modifying the underlying encoder architecture. On Atari 100k, FLASH improves the IQM human-normalized score of \todo{evaluated baselines} by \todo{relative IQM improvement}, with a measured total training time increase of 5.11--7.41\% for STORM across three GPUs (Table~\ref{tab:efficiency}).
 \end{itemize}
@@ -161,7 +161,7 @@ and analogously for $\Delta V$. For each time step $t$ in the sampled trajectori
 S_t = \text{ReLU}\!\left(\frac{\delta^{\text{TD}}_t - \bar{\mu}_e}{\sqrt{\bar{\sigma}^2_e} + \epsilon}\right) \cdot \text{softplus}\!\left(\frac{\Delta V_t - \bar{\mu}^{V}_e}{\sqrt{\bar{\sigma}^{2,V}_e} + \epsilon}\right).
 \label{eq:surprise}
 \end{equation}
-By pairing a strict ReLU with a softplus, this formulation guarantees that it will never fire unless the TD-error is above average, regardless of how much the value spikes. Conversely, an extremely large TD-error can still trigger the anchor even if the value decreases slightly. This captures the pivotal moments where a highly surprising or high-reward sub-trajectory is first discovered. For each trajectory sequence in the batch, when the maximum surprise score across its time steps exceeds the threshold ($\max_{t \in \text{seq}} S_t > \tau_z$), the corresponding buffer pointer (offset backwards by $\Delta_{\text{anchor}}$ steps to capture the critical preceding actions that caused the surprise; see Appendix~\ref{sec:appendix_causal_anchor} for architectural details) is registered as an \textit{active anchor} $a = (p_{t^*+\Delta_\text{anchor}},\, e)$ where $t^* = \text{argmax}_{t \in \text{seq}} S_t$, in a FIFO queue $\mathcal{A}$.
+By pairing a strict ReLU with a softplus, this formulation guarantees that it will never fire unless the TD-error is above average, regardless of how much the value spikes. Conversely, an extremely large TD-error can still trigger the anchor even if the value decreases slightly. This captures the pivotal moments where a highly surprising or high-reward sub-trajectory is first discovered. For each trajectory sequence in the batch, when the maximum surprise score across its time steps exceeds the threshold ($\max_{t \in \text{seq}} S_t > \tau_z$), the corresponding buffer pointer (offset backwards by $\Delta_{\text{anchor}}$ steps to capture the critical preceding actions that caused the surprise; see Appendix~\ref{sec:appendix_causal_anchor} for architectural details) is registered as an active anchor $a = (p_{t^*+\Delta_\text{anchor}},\, e)$ where $t^* = \text{argmax}_{t \in \text{seq}} S_t$, in a FIFO queue $\mathcal{A}$.
 
 \paragraph{Neighbor Retrieval and Re-verification.}
 At each imagination step (where the agent generates imagined trajectories for policy training), FLASH pops up to $M$ anchors from $\mathcal{A}$. For each anchor $a$ with stored hash key $k_a$, we sample up to $m \times (n{-}1)$ candidate pointers from bucket $\mathcal{B}_{k_a}$ (excluding the anchor itself). To combat \textit{representation drift} (the gradual shift in hash keys as $f_\theta$ evolves), we perform \textbf{lazy re-verification}: each candidate's single-frame observation is re-encoded through the \textit{current} world model, and only candidates whose re-computed hash key matches $k_a$ are retained. This yields a set of verified neighbors $\mathcal{N}_a$ with $|\mathcal{N}_a| \leq n$, including the anchor itself. The re-verification hit rate is used to trigger the memory maintenance procedure in Section~\ref{subsec:flash_memory}.
@@ -244,6 +244,11 @@ We evaluate our method across all 26 games of the Atari 100k benchmark. For each
 \subsection{Main Performance}
 Table~\ref{tab:main_performance} presents the comprehensive Atari 100k results. 
 
+Our evaluation reveals that FLASH yields substantial improvements in several environments (e.g., Alien, Frostbite, Qbert), while delivering modest but consistent performance gains across most other games.
+
+FLASH shows substantial gains in \textit{Alien}, \textit{Frostbite}, and \textit{Qbert}. These results demonstrate the utility of targeted experience reuse in the evaluated runs. We assess the contribution of retrieval through ablations in Section~\ref{subsec:ablation_main}, rather than attributing the differences across games to a specific gradient or disentanglement mechanism.
+
+Overall, the results show that the benefit of FLASH varies across environments.
 
 \begin{table}[!t]
 \centering
@@ -290,12 +295,6 @@ Optimality Gap ($\downarrow$) & 1.000 & 0.000 & 0.514  & \textcolor{blue}{0.500}
 \end{tabular}
 }
 \end{table}
-
-Our evaluation reveals that FLASH yields substantial improvements in several environments (e.g., Alien, Frostbite, Qbert), while delivering modest but consistent performance gains across most other games.
-
-FLASH shows substantial gains in \textit{Alien}, \textit{Frostbite}, and \textit{Qbert}. These results demonstrate the utility of targeted experience reuse in the evaluated runs. We assess the contribution of retrieval through ablations in Section~\ref{subsec:ablation_main}, rather than attributing the differences across games to a specific gradient or disentanglement mechanism.
-
-Overall, the results show that the benefit of FLASH varies across environments.
 
 \subsection{Amplification of Successful Exploration}
 \label{subsec:exploitation_amplifier}
@@ -848,8 +847,8 @@ We use this observation as motivation for FLASH, rather than as evidence of its 
 \label{sec:appendix_ablation_studies}
 To isolate and validate the impact of the core components introduced in FLASH, we conducted rigorous ablation studies. The summarized results discussed in Section \ref{subsec:ablation_main} are elaborated below.
 
-\subsection{Ablation 1: The Role of Retrieval (In-batch Injection)}
-In this setting, we preserve the exact triggering condition of FLASH ($\text{ReLU(TD-error)} \times \text{Softplus(Value Difference)}$) but completely disable the subsequent retrieval mechanism. When a pivotal anchor is triggered, it is injected into the training batch alone, without pulling in structurally similar historical states from the hash buckets. The observed performance drop supports the utility of retrieving structurally similar historical contexts in addition to the selected anchor. In the evaluated setting, anchor injection alone does not reproduce the performance of the full method.
+\subsection{Ablation 1: The Role of Neighbor Retrieval}
+In this setting, we preserve the exact triggering condition of FLASH ($\text{ReLU(TD-error)} \times \text{Softplus(Value Difference)}$) but disable neighbor retrieval from the hash buckets. When an anchor is triggered, only its associated replay context is included in the imagination batch, without retrieving structurally similar historical contexts. The observed performance drop supports the utility of augmenting the anchor context with related historical contexts. In the evaluated setting, this anchor-only variant does not reproduce the performance of the full method.
 
 \todo{Include comprehensive tables and graphs detailing the specific quantitative performance metrics across the evaluated environments for this ablation.}
 
