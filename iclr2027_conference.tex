@@ -141,7 +141,7 @@ where $B$ is the number of hash bits, $\mu$ is the centering vector (initially $
 Each transition pointer $(p_t, e)$ (where $p_t$ is the circular buffer index and $e$ is the environment index) is inserted into a hash bucket $\mathcal{B}_{h(z_t)}$. If a pointer's hash key changes (due to Global Rebuild), it is transparently migrated.
 
 \paragraph{Memory Maintenance.}
-As the encoder evolves, stored hash keys can become stale. We monitor the average hit rate, defined as the fraction of retrieval candidates passing re-verification (Section~\ref{subsec:flash_retrieval}). If this rate drops below a threshold $\eta$, a \textbf{Global Rebuild} is triggered: all hash buckets are cleared, the PCA projection $W_{\text{proj}}$ and mean $\mu$ are recomputed from a fresh encoding of the entire replay buffer, and all transitions are re-hashed. This refreshes the index to reflect the current representation, subject to a cooldown period to amortize cost.
+As the encoder evolves, stored hash keys can become stale. We monitor the average hit rate, defined as the fraction of retrieval candidates passing re-verification (Section~\ref{subsec:flash_retrieval}). If this rate drops below a threshold $\eta$, a Global Rebuild is triggered: all hash buckets are cleared, the PCA projection $W_{\text{proj}}$ and mean $\mu$ are recomputed from a fresh encoding of the entire replay buffer, and all transitions are re-hashed. This refreshes the index to reflect the current representation, subject to a cooldown period to amortize cost.
 
 \subsection{Surprise-Guided Retrieval}
 \label{subsec:flash_retrieval}
@@ -228,7 +228,7 @@ In our experiments, we set the retrieval warmup to $T_{\text{warm}} = T/2 = 50,0
 \begin{figure}[t]
 \centering
 \includegraphics[width=\textwidth]{pipeline.pdf}
-\caption{Overview of the FLASH pipeline. \textbf{(Left)} During environment interaction, each observation is processed by the encoder and projector to generate a discrete binary hash, which is registered in a hash bucket. \textbf{(Right)} Triggered anchors during world model training and target states retrieve structurally similar frames with matching hashes from the hash bucket. These grouped experiences serve as the basis for imagination, naturally clustering structurally aliased past experiences together.}
+\caption{Overview of the FLASH pipeline. (Left) During environment interaction, observations are encoded and projected into discrete hash keys registered in a hash bucket. (Right) Triggered anchors retrieve structurally similar replay contexts with matching hashes. Each retrieved target retains its recorded action; after this fixed action is applied, policy-driven imagination starts from the resulting model-predicted next state. The resulting groups replace part of the random imagination batch.}
 \label{fig:flash_pipeline}
 \end{figure}
 
@@ -343,21 +343,25 @@ Over the full 100k-step budget, including retrieval warmup, FLASH increases STOR
 
 \begin{table}[!t]
 \centering
+\begin{minipage}{0.5\textwidth}
+\centering
 \caption{Training time on Atari 100k.}
 \label{tab:efficiency}
 \small
 \setlength{\tabcolsep}{3pt}
 \renewcommand{\arraystretch}{1.2}
-\begin{tabular}{@{}p{0.38\textwidth}rrrr@{}}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{@{}lrrrr@{}}
 \toprule
 GPU & \shortstack{STORM\\(min)} & \shortstack{STORM + FLASH\\(min)} & \shortstack{Extra time\\(min)} & \shortstack{Overhead\\(\%)} \\
 \midrule
-% Times in minutes; Extra time = FLASH - baseline; Overhead = 100 * Extra time / baseline.
 NVIDIA RTX A6000 & 297 & 319 & 22 & 7.41 \\
-NVIDIA RTX PRO 6000 Blackwell Server Edition & 159 & 170 & 11 & 6.92 \\
-NVIDIA GeForce RTX 3090 & 411 & 432 & 21 & 5.11 \\
+NVIDIA RTX PRO 6000 & 159 & 170 & 11 & 6.92 \\
+NVIDIA GeForce 3090 & 411 & 432 & 21 & 5.11 \\
 \bottomrule
-\end{tabular}
+\end{tabular}%
+}
+\end{minipage}
 \end{table}
 
 \subsection{Value Responses to Controlled Igloo Progression}
