@@ -46,7 +46,7 @@ Recent high-fidelity generative world models demonstrate that preserving visual 
 
 To examine whether limited representation capacity necessarily explains poor control, we first investigate what information is retained by lightweight encoders. Controlled latent-similarity analyses show that the representations are sensitive to changes in small task-relevant elements, motivating a more direct probing analysis. Our supervised probes predict selected task variables from latent states with high accuracy under clean observations, despite poor visual reconstruction. These results indicate that at least some task-relevant information remains accessible in compact latent representations, suggesting that poor reconstruction alone is insufficient to explain limited control performance.
 
-We further observed substantial run-to-run variation in preliminary DRAMA \citep{wang2025drama} experiments on Seaquest. Across independent runs using different random seeds under the same implementation and hyperparameter configuration, stochastic training trajectories led to substantially different scores of approximately 600 and 1,500. In the inspected behavior, the higher-scoring run sustained hunting until oxygen depletion, whereas the lower-scoring run died in collisions during hunting; neither exhibited surfacing with collected divers. Together with the probing evidence above, this run-to-run variation motivates us to ask whether informative experiences encountered during training can be translated into policy and value improvement more reliably through downstream Actor-Critic optimization. We describe this preliminary observation and its interpretation limits in Appendix~\ref{sec:appendix_ac_bottleneck}.
+We further observed substantial run-to-run variation in preliminary DRAMA \citep{wang2025drama} experiments on Seaquest \citep{pmlr-v48-zahavy16}. Across independent runs using different random seeds under the same implementation and hyperparameter configuration, stochastic training trajectories led to substantially different scores of approximately 600 and 1,500. In the inspected behavior, the higher-scoring run sustained hunting until oxygen depletion, whereas the lower-scoring run died in collisions during hunting; neither exhibited surfacing with collected divers. Together with the probing evidence above, this run-to-run variation motivates us to ask whether informative experiences encountered during training can be translated into policy and value improvement more reliably through downstream Actor-Critic optimization. We describe this preliminary observation and its interpretation limits in Appendix~\ref{sec:appendix_ac_bottleneck}.
 
 Accurate prediction by a supervised probe does not guarantee effective use of the same information for control, since supervised probes and Actor-Critic learners receive different learning signals and optimize different objectives. We refer to task-relevant differences that remain difficult for a downstream learner to distinguish in highly similar latent representations as aliasing; identical latent vectors are not required. Motivated by the probing evidence and the observed run-to-run variation, we investigate whether targeted reuse of informative experiences can make downstream learning more reliable. FLASH identifies salient learning events, retrieves structurally similar past experiences through hashing, and incorporates them into the same Actor-Critic training batch. Its design targets experiences already encountered rather than discovering previously unseen rewarding behavior.
 
@@ -253,38 +253,38 @@ Overall, the results show that the benefit of FLASH varies across environments.
 \toprule
 Game & Random & Human & STORM & STORM+ours & DRAMA & DRAMA+ours & EDELINE & EDELINE+ours \\
 \midrule
-Alien         & 227.8 & 7127.7 & 1041.8 & \textcolor{blue}{1091.1} & 787.5 & 792.5 & - & -  \\
-Amidar        & 5.8 & 1719.5 & 175.9 & \textcolor{red}{150.5} & 162 & 131 & - & -  \\
-Assault       & 222.4 & 742.0 & 643.7 & \textcolor{blue}{693.0} & 336 & 630 & - & -  \\
-Asterix       & 210.0 & 8503.3 & 546.2 & \textcolor{blue}{572.5} & - & - & - & -  \\
+Alien         & 227.8 & 7127.7 & 1041.8 & \textcolor{blue}{1091.1} & 1316 & \textcolor{red}{\textbf{732}} & - & -  \\
+Amidar        & 5.8 & 1719.5 & 175.9 & \textcolor{red}{150.5} & 119.2 & \textcolor{red}{\textbf{101.2}} & - & -  \\
+Assault       & 222.4 & 742.0 & 643.7 & \textcolor{blue}{693.0} & 329.7 & \textcolor{blue}{\textbf{470.4}} & - & -  \\
+Asterix       & 210.0 & 8503.3 & 546.2 & \textcolor{blue}{572.5} & 1820 & \textcolor{red}{\textbf{1230}} & - & -  \\
 BankHeist     & 14.2 & 753.1 & 163 & \textcolor{blue}{169.5} & - & - & - & -  \\
-BattleZone    & 2360.0 & 37187.5 & 10575 & \textcolor{blue}{10608.3} & 13000 & 10000 & - & -  \\
-Boxing        & 0.1 & 12.1 & 74.8 & \textcolor{blue}{77.3} & - & - & - & -  \\
+BattleZone    & 2360.0 & 37187.5 & 10575 & \textcolor{blue}{10608.3} & 11450 & \textcolor{red}{9900} & - & -  \\
+Boxing        & 0.1 & 12.1 & 74.8 & \textcolor{blue}{77.3} & 83.7 & \textcolor{red}{76.4} & - & -  \\
 Breakout      & 1.7 & 30.5 & 11.7 & \textcolor{blue}{12.4} & - & - & - & -  \\
-ChopperCommand & 811.0 & 7387.8 & 1598.3 & \textcolor{red}{\textbf{1225}} & - & - & - & -  \\
+ChopperCommand & 811.0 & 7387.8 & 1598.3 & \textcolor{red}{\textbf{1225}} & 1350 & \textcolor{blue}{1390} & - & -  \\
 CrazyClimber  & 10780.5 & 35829.4 & 57571.7 & \textcolor{blue}{57908.3} & - & - & - & -  \\
-DemonAttack   & 152.1 & 1971.0 & 193 & \textcolor{red}{171.5} & - & - & - & -  \\
+DemonAttack   & 152.1 & 1971.0 & 193 & \textcolor{red}{171.5} & 170.2 & \textcolor{red}{\textbf{134}} & - & -  \\
 Freeway       & 0.0 & 29.6 & - & - & - & - & - & -  \\
-Frostbite     & 65.2 & 4334.7 & 1807.5 & \textcolor{blue}{2059.5} & 250 & 250 & - & -  \\
-Gopher        & 257.6 & 2412.5 & 3747 & \textcolor{red}{3578} & - & - & - & -  \\
+Frostbite     & 65.2 & 4334.7 & 1807.5 & \textcolor{blue}{2059.5} & 257.3 & \textcolor{red}{254.3} & - & -  \\
+Gopher        & 257.6 & 2412.5 & 3747 & \textcolor{red}{3578} & 1607 & \textcolor{red}{\textbf{1121}} & - & -  \\
 Hero          & 1027.0 & 30826.4 & 13178 & \textcolor{blue}{13269.4} & - & - & - & -  \\
-Jamesbond     & 29.0 & 302.8 & - & - & - & - & - & -  \\
+Jamesbond     & 29.0 & 302.8 & - & - & 485 & \textcolor{red}{445} & - & -  \\
 Kangaroo      & 52.0 & 3035.0 & 1620 & \textcolor{blue}{1675} & - & - & - & -  \\
-Krull         & 1598.0 & 2665.5 & 5608 & \textcolor{blue}{5915.2} & 10350 & 10250 & - & -  \\
+Krull         & 1598.0 & 2665.5 & 5608 & \textcolor{blue}{5915.2} & 9836 & \textcolor{red}{8737} & - & -  \\
 KungFuMaster  & 258.5 & 22736.3 & 25137.5 & \textcolor{blue}{25177.5} & - & - & - & -  \\
 MsPacman      & 307.3 & 6951.6 & - & - & - & - & - & -  \\
-Pong          & -20.7 & 14.6 & 6.5 & \textcolor{blue}{\textbf{10.8}} & - & - & - & -  \\
+Pong          & -20.7 & 14.6 & 6.5 & \textcolor{blue}{\textbf{10.8}} & 20 & 20 & - & -  \\
 PrivateEye    & 24.9 & 69571.3 & - & - & - & - & - & -  \\
-Qbert         & 163.9 & 13455.0 & 2875.2 & \textcolor{blue}{2920.2} & - & - & - & -  \\
+Qbert         & 163.9 & 13455.0 & 2875.2 & \textcolor{blue}{2920.2} & 633.8 & \textcolor{blue}{\textbf{801.2}} & - & -  \\
 RoadRunner    & 11.5 & 7845.0 & - & - & - & - & - & -  \\
 Seaquest      & 68.4 & 42054.7 & - & - & - & - & - & -  \\
-UpNDown       & 533.4 & 11693.2 & 5022 & \textcolor{blue}{5225.2} & - & - & - & -  \\
+UpNDown       & 533.4 & 11693.2 & 5022 & \textcolor{blue}{5225.2} & 4661.5 & \textcolor{blue}{5158.5} & - & -  \\
 \midrule
-\#Superhuman ($\uparrow$) & 0 & N/A & 5  & 5 & -  & -  & -  & -  \\
-Mean ($\uparrow$) & 0.000 & 1.000 & 0.964  & \textcolor{blue}{1.000} & -  & -  & -  & -  \\
-Median ($\uparrow$) & 0.000 & 1.000 & 0.405  & \textcolor{blue}{0.416} & -  & -  & -  & -  \\
-IQM ($\uparrow$) & 0.000 & 1.000 & 0.431  & \textcolor{blue}{0.467} & -  & -  & -  & -  \\
-Optimality Gap ($\downarrow$) & 1.000 & 0.000 & 0.514  & \textcolor{blue}{0.500} & -  & -  & -  & -  \\
+\#Superhuman ($\uparrow$) & 0 & N/A & 5  & 5 & 4 & 4 & -  & -  \\
+Mean ($\uparrow$) & 0.000 & 1.000 & 0.964  & \textcolor{blue}{1.000} & 1.304 & \textcolor{red}{1.177} & -  & -  \\
+Median ($\uparrow$) & 0.000 & 1.000 & 0.405  & \textcolor{blue}{0.416} & 0.207 & \textcolor{blue}{0.216} & -  & -  \\
+IQM ($\uparrow$) & 0.000 & 1.000 & 0.431  & \textcolor{blue}{0.467} & 0.346 & \textcolor{red}{0.334} & -  & -  \\
+Optimality Gap ($\downarrow$) & 1.000 & 0.000 & 0.514  & \textcolor{blue}{0.500} & 0.596 & \textcolor{red}{0.605} & -  & -  \\
 \bottomrule
 \end{tabular}
 }
