@@ -112,9 +112,57 @@ Here, we use blurry only to describe the visual appearance of decoded images, no
 
 To formally investigate whether standard lightweight encoders successfully capture functionally critical elements, we conducted extensive probing experiments on the Seaquest environment. First, using images with perfectly identical backgrounds varying only the target elements, we observed that the pairwise cosine similarities of latent states encoding different diver counts and positions were strictly less than 1.0 (dropping to $0.86$ and $0.63$, respectively). This suggests sensitivity to changes in these target regions, motivating a direct test of whether a supervised probe can predict the corresponding task variables from latent states.
 
-To assess prediction accuracy, we detached the pre-trained encoder and trained a lightweight multilayer perceptron (MLP) to predict ground-truth Random Access Memory (RAM) states (e.g., diver counts and exact $(x, y)$ coordinates) directly from the latent state $z$. As detailed in Appendix \ref{sec:appendix_detailed_probing}, our probing achieved exceptional accuracy ($>99\%$ for diver counting and $92.4\%$ for diver presence prediction) on pristine clean observations. However, when we injected extreme uniform noise into the background spaces while leaving only the target bounding box intact, the classification accuracy plummeted drastically (e.g., from $99.6\%$ to $68.1\%$ in Seaquest). \todo{noise strength를 여러 단계로 바꾸면서 performance가 어떻게 떨어지는지 graph 그려야함} This drop indicates that the encoder--probe pipeline is sensitive to background corruption. It is consistent with spatial entanglement, but extreme noise also introduces a distribution shift, so this experiment alone does not isolate the cause of the degradation.
+To assess prediction accuracy, we detached the pre-trained encoder and trained a lightweight multilayer perceptron (MLP) to predict ground-truth Random Access Memory (RAM) states (e.g., diver counts and exact $(x, y)$ coordinates) directly from the latent state $z$. The frozen encoder had not encountered states with 4--6 collected divers during its RL training, although these counts were included in the supervised probe training set. Figure~\ref{fig:probing_summary}(c) summarizes the clean probing results. The mean localization error of 12.44 pixels is measured in the original Atari screen coordinates and corresponds to less than 5 pixels in the encoder's $64\times64$ input space; part of this residual error may arise from the spatial and temporal mismatch between Atari RAM states and rendered sprites (Appendix~\ref{sec:appendix_ram_misalignment}). However, when we injected extreme uniform noise into the background spaces while leaving only the target bounding box intact, the classification accuracy dropped substantially (e.g., from 99.6\% to 68.1\% in Seaquest). \todo{noise strength를 여러 단계로 바꾸면서 performance가 어떻게 떨어지는지 graph 그려야함} This drop indicates that the encoder--probe pipeline is sensitive to background corruption. It is consistent with spatial entanglement, but extreme noise also introduces a distribution shift, so this experiment alone does not isolate the cause of the degradation.
 
-Crucially, cosine differences indicate representational sensitivity, whereas the high clean probing accuracy provides more direct evidence that supervised probes can predict the evaluated task variables from the latent states. These findings do not establish that all semantic information is preserved or that spatial entanglement is the sole bottleneck. Nevertheless, They suggest that poor reconstruction alone is insufficient to diagnose missing task-relevant information, motivating interventions that help downstream learners use the information available in these representations.
+Crucially, cosine differences indicate representational sensitivity, whereas the high clean probing accuracy provides more direct evidence that supervised probes can predict the evaluated task variables from the latent states. These findings do not establish that all semantic information is preserved or that spatial entanglement is the sole bottleneck. Nevertheless, they suggest that poor reconstruction alone is insufficient to diagnose missing task-relevant information, motivating interventions that help downstream learners use the information available in these representations.
+
+\begin{figure}[t]
+\centering
+
+\begin{minipage}[t]{0.31\textwidth}
+  \vspace{0pt}
+  \centering
+  \includegraphics[width=\linewidth]{heatmap/diver_count.jpg}
+  \vspace{1mm}
+  \small (a) Diver Count (0--6)
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.31\textwidth}
+  \vspace{0pt}
+  \centering
+  \includegraphics[width=\linewidth]{heatmap/diver_location.jpg}
+  \vspace{1mm}
+  \small (b) Diver Position
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.34\textwidth}
+  \vspace{0pt}
+  \centering
+  \vspace{9.5mm}
+  \scriptsize
+  \setlength{\tabcolsep}{3pt}
+  \renewcommand{\arraystretch}{1.15}
+  \begin{tabular}{@{}lcc@{}}
+    \hline
+    \textbf{Target} & \textbf{Metric} & \textbf{Result} \\
+    \hline
+    Count (0--6) & Acc. & 99.6\% \\
+    Count (4--6) & Acc. & $>$93\% \\
+    Presence & Acc. & 92.4\% \\
+    Position & Mean error & 12.44 px \\
+    \hline
+  \end{tabular}
+
+  \vspace{7mm}
+  \small (c) Clean probing results
+\end{minipage}
+
+\caption{
+(a--b) Pairwise cosine similarities of latent states when only the diver count or diver position is varied while the background is fixed.
+(c) Performance of supervised probes trained on frozen latent representations.
+}
+\label{fig:probing_summary}
+\end{figure}
 
 \subsection{The Actor-Critic Optimization as an Intervention Point}
 \label{subsec:ac_intervention}
@@ -736,25 +784,8 @@ This section provides the comprehensive experimental setup and extended results 
 \subsection{Preliminary Observation: The Cosine Similarity Clue}
 To formally investigate whether the encoder successfully captures functionally critical, yet small and static elements, we designed a motivating experiment. Instead of a single comparison, we generated two comprehensive sets of images by fixing the background to be perfectly identical and replacing only the diver regions to vary the target elements: one varying the number of collected divers at the bottom area (from 0 to 6), and another varying the position of a single diver on the sea area. We then extracted their latent states and computed the pairwise cosine similarities.
 
-\begin{figure}[!t]
-\centering
-\begin{minipage}{0.48\textwidth}
-  \centering
-  \includegraphics[width=\linewidth]{heatmap/diver_count.jpg}
-  \caption{Cosine Similarity: Diver Count (0-6)}
-  \label{fig:heatmap_count}
-\end{minipage}\hfill
-\begin{minipage}{0.48\textwidth}
-  \centering
-  \includegraphics[width=\linewidth]{heatmap/diver_location.jpg}
-  \caption{Cosine Similarity: Diver Position}
-  \label{fig:heatmap_position}
-\end{minipage}
-\caption{Cosine similarity heatmaps of latent states in Seaquest. The structured similarity patterns suggest sensitivity to changes in the target regions. These patterns motivate evaluating whether supervised probes can predict the corresponding task variables from latent states.}
-\label{fig:heatmaps}
-\end{figure}
 
-As shown in Figure~\ref{fig:heatmaps}, both heatmaps reveal distinct structural patterns rather than a uniform similarity of 1.0. For the diver count (left), states with similar counts exhibit high cosine similarity ($0.93$--$0.98$), while states with larger count differences drop as low as $0.86$. For the diver position (right), we fixed the submarine at the center and moved a single diver from the far left edge to just left of the submarine; as displacement increases, the similarity degrades down to $0.63$. These patterns suggest sensitivity to the controlled visual changes, motivating our subsequent probing analysis. They do not by themselves establish that a probe can accurately predict the underlying task variables from latent states. If latent sampling is used, stochastic variation must also be controlled when interpreting these differences.
+As shown in Figure~\ref{fig:probing_summary}(a--b), both heatmaps reveal distinct structural patterns rather than a uniform similarity of 1.0. For the diver count (left), states with similar counts exhibit high cosine similarity ($0.93$--$0.98$), while states with larger count differences drop as low as $0.86$. For the diver position (right), we fixed the submarine at the center and moved a single diver from the far left edge to just left of the submarine; as displacement increases, the similarity degrades down to $0.63$. These patterns suggest sensitivity to the controlled visual changes, motivating our subsequent probing analysis. They do not by themselves establish that a probe can accurately predict the underlying task variables from latent states. If latent sampling is used, stochastic variation must also be controlled when interpreting these differences.
 
 \subsection{Probing the Latent Space}
 \label{subsec:appendix_probing_latent}
