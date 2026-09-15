@@ -745,9 +745,9 @@ class BranchSupervisorTests(unittest.TestCase):
             self.assertEqual(args[:3], [sys.executable, str(ROOT / "training_branches.py"), "--supervise"])
             manifest = json.loads(Path(args[3]).read_text())
             self.assertEqual(manifest["commands"], {"retrieval_on": enabled, "retrieval_off": disabled})
-            self.assertEqual(manifest["execution_order"], ["retrieval_off", "retrieval_on"])
+            self.assertEqual(manifest["execution_order"], ["retrieval_on", "retrieval_off"])
 
-    def test_children_run_false_then_true_from_same_unchanged_saved_state(self):
+    def test_children_run_true_then_false_from_same_unchanged_saved_state(self):
         with tempfile.TemporaryDirectory() as directory:
             shared = Path(directory) / "shared.json"
             original = json.dumps({"next_step": 101, "optimizer_updates": 17})
@@ -756,14 +756,14 @@ class BranchSupervisorTests(unittest.TestCase):
                 "import json, pathlib, sys, time",
                 "name = sys.argv[1]",
                 "state = json.loads(pathlib.Path('shared.json').read_text())",
-                "if name == 'on':",
-                "    assert pathlib.Path('off.json').exists()",
-                "    assert not pathlib.Path('off.running').exists()",
+                "if name == 'off':",
+                "    assert pathlib.Path('on.json').exists()",
+                "    assert not pathlib.Path('on.running').exists()",
                 "    progress = json.loads(pathlib.Path('branch_results.json').read_text())",
-                "    assert progress['exit_codes']['retrieval_off'] == 0",
-                "    assert progress['active_branch'] == 'retrieval_on'",
+                "    assert progress['exit_codes']['retrieval_on'] == 0",
+                "    assert progress['active_branch'] == 'retrieval_off'",
                 "else:",
-                "    assert not pathlib.Path('on.json').exists()",
+                "    assert not pathlib.Path('off.json').exists()",
                 "pathlib.Path(name + '.running').touch()",
                 "time.sleep(0.05)",
                 "state['initial_step'] = state['next_step']",
@@ -786,48 +786,48 @@ class BranchSupervisorTests(unittest.TestCase):
             summary = json.loads((Path(directory) / "branch_results.json").read_text())
             self.assertEqual(summary["exit_codes"], {"retrieval_on": 0, "retrieval_off": 0})
 
-    def test_failed_false_does_not_start_true(self):
+    def test_failed_true_does_not_start_false(self):
         with tempfile.TemporaryDirectory() as directory:
             manifest = self.write_manifest(directory, {
-                "retrieval_on": [sys.executable, "-c", "from pathlib import Path; Path('on.started').touch()"],
-                "retrieval_off": [sys.executable, "-c", "raise SystemExit(7)"],
+                "retrieval_off": [sys.executable, "-c", "from pathlib import Path; Path('off.started').touch()"],
+                "retrieval_on": [sys.executable, "-c", "raise SystemExit(7)"],
             })
             result = self.run_supervisor(manifest)
             self.assertEqual(result.returncode, 7, result.stderr)
-            self.assertFalse((Path(directory) / "on.started").exists())
+            self.assertFalse((Path(directory) / "off.started").exists())
             summary = json.loads((Path(directory) / "branch_results.json").read_text())
             self.assertEqual(summary["supervisor_exit_code"], 7)
-            self.assertEqual(summary["exit_codes"], {"retrieval_off": 7})
+            self.assertEqual(summary["exit_codes"], {"retrieval_on": 7})
 
-    def test_true_failure_preserves_completed_false(self):
+    def test_false_failure_preserves_completed_true(self):
         with tempfile.TemporaryDirectory() as directory:
             manifest = self.write_manifest(directory, {
-                "retrieval_off": [sys.executable, "-c", "from pathlib import Path; Path('off.weights').write_bytes(b'final-false')"],
-                "retrieval_on": [sys.executable, "-c", "raise SystemExit(9)"],
+                "retrieval_on": [sys.executable, "-c", "from pathlib import Path; Path('on.weights').write_bytes(b'final-true')"],
+                "retrieval_off": [sys.executable, "-c", "raise SystemExit(9)"],
             })
             result = self.run_supervisor(manifest)
             self.assertEqual(result.returncode, 9, result.stderr)
-            self.assertEqual((Path(directory) / "off.weights").read_bytes(), b"final-false")
+            self.assertEqual((Path(directory) / "on.weights").read_bytes(), b"final-true")
             summary = json.loads((Path(directory) / "branch_results.json").read_text())
-            self.assertEqual(summary["exit_codes"], {"retrieval_off": 0, "retrieval_on": 9})
+            self.assertEqual(summary["exit_codes"], {"retrieval_on": 0, "retrieval_off": 9})
 
-    def test_interrupt_during_true_preserves_false_and_shared_checkpoint(self):
+    def test_interrupt_during_false_preserves_true_and_shared_checkpoint(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "shared.weights").write_bytes(b"warmup-state")
             manifest = self.write_manifest(directory, {
-                "retrieval_off": [sys.executable, "-c", "from pathlib import Path; Path('off.weights').write_bytes(b'final-false')"],
-                "retrieval_on": [sys.executable, "-c", "from pathlib import Path; import time; assert Path('off.weights').exists(); Path('on.started').touch(); time.sleep(30)"],
+                "retrieval_on": [sys.executable, "-c", "from pathlib import Path; Path('on.weights').write_bytes(b'final-true')"],
+                "retrieval_off": [sys.executable, "-c", "from pathlib import Path; import time; assert Path('on.weights').exists(); Path('off.started').touch(); time.sleep(30)"],
             })
             process = subprocess.Popen([sys.executable, str(ROOT / "training_branches.py"), "--supervise", str(manifest)],
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             try:
                 deadline = time.monotonic() + 5
-                while not (root / "on.started").exists() and process.poll() is None and time.monotonic() < deadline:
+                while not (root / "off.started").exists() and process.poll() is None and time.monotonic() < deadline:
                     time.sleep(.01)
-                self.assertTrue((root / "on.started").exists())
+                self.assertTrue((root / "off.started").exists())
                 progress = json.loads((root / "branch_results.json").read_text())
-                self.assertEqual(progress["exit_codes"], {"retrieval_off": 0})
+                self.assertEqual(progress["exit_codes"], {"retrieval_on": 0})
                 process.terminate()
                 process.communicate(timeout=5)
                 self.assertEqual(process.returncode, 128 + signal.SIGTERM)
@@ -835,11 +835,11 @@ class BranchSupervisorTests(unittest.TestCase):
                 if process.poll() is None:
                     process.terminate()
                     process.communicate(timeout=5)
-            self.assertEqual((root / "off.weights").read_bytes(), b"final-false")
+            self.assertEqual((root / "on.weights").read_bytes(), b"final-true")
             self.assertEqual((root / "shared.weights").read_bytes(), b"warmup-state")
             summary = json.loads((root / "branch_results.json").read_text())
-            self.assertEqual(summary["exit_codes"]["retrieval_off"], 0)
-            self.assertEqual(summary["exit_codes"]["retrieval_on"], -signal.SIGTERM)
+            self.assertEqual(summary["exit_codes"]["retrieval_on"], 0)
+            self.assertEqual(summary["exit_codes"]["retrieval_off"], -signal.SIGTERM)
 
 
 class FinalModelTests(unittest.TestCase):

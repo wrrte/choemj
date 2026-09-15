@@ -2,7 +2,7 @@
 
 The training process writes one checkpoint and execs this module's lightweight
 supervisor. Replacing that process releases its entire CUDA context before the
-independent Python training processes run one at a time: False, then True.
+independent Python training processes run one at a time: True, then False.
 """
 
 import argparse
@@ -72,7 +72,7 @@ def restore_rng_state(state):
 
 
 def launch_training_branches(checkpoint_dir, enabled_command, disabled_command):
-    """Replace this process with a supervisor that runs False, then True.
+    """Replace this process with a supervisor that runs True, then False.
 
     Callers must close environments and flush/close loggers first. Each command
     must explicitly select its boolean branch so a child cannot branch again.
@@ -84,10 +84,10 @@ def launch_training_branches(checkpoint_dir, enabled_command, disabled_command):
     _write_json(manifest, {
         "checkpoint_dir": str(checkpoint_dir),
         "cwd": os.getcwd(),
-        "execution_order": ["retrieval_off", "retrieval_on"],
+        "execution_order": ["retrieval_on", "retrieval_off"],
         "commands": {"retrieval_on": list(enabled_command), "retrieval_off": list(disabled_command)},
     })
-    print(f"Starting sequential Retrieval False -> True runs from {checkpoint_dir}", flush=True)
+    print(f"Starting sequential Retrieval True -> False runs from {checkpoint_dir}", flush=True)
     sys.stdout.flush()
     sys.stderr.flush()
     os.execv(sys.executable, [sys.executable, str(Path(__file__).resolve()), "--supervise", str(manifest)])
@@ -139,12 +139,12 @@ def _stop_processes(processes):
 
 
 def run_branch_supervisor(manifest_path):
-    """Finish False before starting True, each from the untouched warmup state."""
+    """Finish True before starting False, each from the untouched warmup state."""
     manifest_path = Path(manifest_path)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     processes = {}
     exit_codes = {}
-    order = ("retrieval_off", "retrieval_on")
+    order = ("retrieval_on", "retrieval_off")
     current_process = None
     active_branch = None
 
@@ -173,7 +173,7 @@ def run_branch_supervisor(manifest_path):
             _stop_processes([current_process])
             current_process = None
             active_branch = None
-            # Persist False's success before True can start or be interrupted.
+            # Persist True's success before False can start or be interrupted.
             record_progress("running")
             if code:
                 print(f"{name} failed with exit code {code}; stopping the sequence.", file=sys.stderr, flush=True)
