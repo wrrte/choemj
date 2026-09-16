@@ -50,11 +50,15 @@ def table(label):
 
 
 DOCUMENT = table("tab:before") + table("tab:main_performance") + table("tab:after")
-RESULTS = {
+DISPLAY_RESULTS = {
     "Alien": ("50", "80"),
     "Amidar": ("100", "150"),
     "Assault": ("150", "150"),
     "Asterix": ("200", "180"),
+}
+RESULTS = {
+    game: tuple([float(value)] for value in values)
+    for game, values in DISPLAY_RESULTS.items()
 }
 
 
@@ -74,14 +78,14 @@ class UpdateTexTests(unittest.TestCase):
             "Mean": ("1.250", "1.400", r"\textcolor{green}{+0.150}"),
             "Median": ("1.250", "1.500", r"\textcolor{green}{+0.250}"),
             "IQM": ("1.250", "1.500", r"\textcolor{green}{+0.250}"),
-            "Optimality Gap": ("0.125", "0.050", r"\textcolor{red}{-0.075}"),
+            "Optimality Gap": ("0.125", "0.050", r"\textcolor{green}{-0.075}"),
         }
         for module in MODULES:
             with self.subTest(module=module.__name__):
                 output = "".join(module.update_table(DOCUMENT.splitlines(True), RESULTS))
                 updated = cells(output)
                 columns = (module.BASE_COLUMN, module.OURS_COLUMN, module.DELTA_COLUMN)
-                for game, values in RESULTS.items():
+                for game, values in DISPLAY_RESULTS.items():
                     self.assertEqual(tuple(updated[game][col] for col in columns[:2]), values)
                 for game, delta in {
                     "Alien": r"\textcolor{green}{+30}",
@@ -147,6 +151,46 @@ class UpdateTexTests(unittest.TestCase):
                 self.assertEqual(module.format_delta("0.1", "0.3", None), r"\textcolor{green}{+0.2}")
                 self.assertEqual(module.format_delta("0.500", "0.500", "Mean"), "0.000")
                 self.assertEqual(module.format_delta(None, "1", None), "-")
+                self.assertEqual(
+                    module.format_delta("0.514", "0.500", "Optimality Gap"),
+                    r"\textcolor{green}{-0.014}",
+                )
+                self.assertEqual(
+                    module.format_delta("0.500", "0.514", "Optimality Gap"),
+                    r"\textcolor{red}{+0.014}",
+                )
+                self.assertEqual(module.format_delta("0.500", "0.500", "Optimality Gap"), "0.000")
+                self.assertEqual(module.format_delta(None, "0.500", "Optimality Gap"), "-")
+
+    def test_iqm_pools_unrounded_seeds_after_game_specific_normalization(self):
+        # Five samples with uneven seed counts. The retained HNS values are
+        # [0.02, 0.03, 0.4] and [0.03, 0.04, 0.8], not two game means.
+        document = DOCUMENT.replace("Alien & 0 & 100 &", "Alien & 0 & 1 &")
+        document = document.replace("Amidar & 0 & 100 &", "Amidar & 100 & 1100 &")
+        results = {
+            "Alien": ([0.01, 0.02, 0.03, 0.44], [0.02, 0.03, 0.04, 0.85]),
+            "Amidar": ([500.0], [900.0]),
+            "NotInTable": ([1e12], [2e12]),
+        }
+        for module in MODULES:
+            with self.subTest(module=module.__name__):
+                updated = cells("".join(module.update_table(document.splitlines(True), results)))
+                self.assertEqual(updated["Alien"][module.BASE_COLUMN], "0.1")
+                self.assertEqual(updated["Alien"][module.OURS_COLUMN], "0.2")
+                self.assertEqual(updated["IQM"][module.BASE_COLUMN], "0.150")
+                self.assertEqual(updated["IQM"][module.OURS_COLUMN], "0.290")
+                self.assertEqual(updated["IQM"][module.DELTA_COLUMN], r"\textcolor{green}{+0.140}")
+                # Other summaries still use the displayed game means.
+                self.assertEqual(updated["Mean"][module.BASE_COLUMN], "0.250")
+                self.assertEqual(updated["Mean"][module.OURS_COLUMN], "0.500")
+
+    def test_iqm_does_not_use_existing_table_means_without_seed_results(self):
+        for module in MODULES:
+            with self.subTest(module=module.__name__):
+                updated = cells("".join(module.update_table(DOCUMENT.splitlines(True), {}, reset=False)))
+                self.assertNotEqual(updated["Mean"][module.BASE_COLUMN], "-")
+                for column in (module.BASE_COLUMN, module.OURS_COLUMN, module.DELTA_COLUMN):
+                    self.assertEqual(updated["IQM"][column], "-")
 
     def test_cli_pairs_seeds_and_uses_latest_duplicate_result(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -157,26 +201,37 @@ class UpdateTexTests(unittest.TestCase):
                     tex = directory / "paper.tex"
                     if module.BASE_COLUMN == 3:
                         frame = pd.DataFrame({
-                            "Game": ["Alien", None],
-                            "Config": ["Retrieval 미사용", "target: 16 (anchor 미설정)"],
-                            1: ["10, 999", "30, 888"], 2: [100, None], 3: [30, 50],
+                            "Game": ["Alien", None, "Amidar", None],
+                            "Config": ["Retrieval 미사용", "target: 16 (anchor 미설정)"] * 2,
+                            1: ["10, 999", "30, 888", 100, 200],
+                            2: [100, None, None, None],
+                            3: [30, 50, 1000, 1200],
                         })
                     else:
                         frame = pd.DataFrame({
-                            "Game": ["Alien", "Alien"], "Retrieval": ["X", "O"],
-                            1: ["10, 999", "30, 888"], 2: [100, None], 3: [30, 50],
+                            "Game": ["Alien", "Alien", "Amidar", "Amidar"],
+                            "Retrieval": ["X", "O"] * 2,
+                            1: ["10, 999", "30, 888", 100, 200],
+                            2: [100, None, None, None],
+                            3: [30, 50, 1000, 1200],
                         })
                     frame.to_excel(excel, sheet_name="Results", index=False)
                     tex.write_text(DOCUMENT, encoding="utf-8")
                     with contextlib.redirect_stdout(io.StringIO()):
-                        self.assertEqual(module.load_results(excel), {"Alien": ("20", "40")})
+                        self.assertEqual(module.load_results(excel), {
+                            "Alien": ([10.0, 30.0], [30.0, 50.0]),
+                            "Amidar": ([100.0, 1000.0], [200.0, 1200.0]),
+                        })
                     subprocess.run(
                         [sys.executable, str(script), "--excel", str(excel), "--tex", str(tex)],
                         cwd=directory, check=True, capture_output=True, text=True,
                     )
                     updated = cells(tex.read_text(encoding="utf-8"))
-                    self.assertEqual(updated["Mean"][module.BASE_COLUMN], "0.200")
-                    self.assertEqual(updated["Mean"][module.OURS_COLUMN], "0.400")
+                    self.assertEqual(updated["Mean"][module.BASE_COLUMN], "2.850")
+                    self.assertEqual(updated["Mean"][module.OURS_COLUMN], "3.700")
+                    self.assertEqual(updated["IQM"][module.BASE_COLUMN], "0.650")
+                    self.assertEqual(updated["IQM"][module.OURS_COLUMN], "1.250")
+                    self.assertEqual(updated["IQM"][module.DELTA_COLUMN], r"\textcolor{green}{+0.600}")
                     self.assertEqual(updated["Alien"][module.DELTA_COLUMN], r"\textcolor{green}{+20}")
 
 
