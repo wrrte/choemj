@@ -68,8 +68,6 @@ Our contributions are threefold:
 \textbf{Latent World Models.}
 Dreamer and DreamerV2 learn policies through latent imagination \citep{hafner2019dream, hafner2020mastering}, while STORM and DRAMA use Transformer- and Mamba-based dynamics, respectively \citep{zhang2023storm, wang2025drama}. FLASH augments the contexts used for Actor-Critic imagination while retaining the base agent's encoder and world-model architectures.
 
-\todo{First conduct a brief feasibility study of porting FLASH to TWISTER as the third base agent. If the required changes are extensive, use TWM as the alternative. Finalize the third base agent after this assessment.}
-
 \textbf{Representation Learning and Diffusion World Models.}
 Prior work improves visual representations through reconstruction \citep{hafner2019learning}, contrastive learning (\citealp{laskin2020curl}), predictive consistency (\citealp{schwarzer2020data}), decoupled representation learning (\citealp{stooke2021decoupling}), or prototypical learning (\citealp{deng2022dreamerpro}). DIAMOND instead uses a diffusion world model to preserve visual detail \citep{alonso2024diffusion}. FLASH investigates better downstream use of compact representations through targeted experience reuse.
 
@@ -119,13 +117,8 @@ Here, we use blurry only to describe the visual appearance of decoded images, no
 
 To formally investigate whether standard lightweight encoders successfully capture functionally critical elements, we conducted extensive probing experiments on the Seaquest environment. First, using images with perfectly identical backgrounds varying only the target elements, we observed that the pairwise cosine similarities of latent states encoding different diver counts and positions were strictly less than 1.0 (dropping to $0.86$ and $0.63$, respectively). This suggests sensitivity to changes in these target regions, motivating a direct test of whether a supervised probe can predict the corresponding task variables from latent states.
 
-To assess prediction accuracy, we detached the pre-trained encoder and trained a lightweight multilayer perceptron (MLP) to predict ground-truth Random Access Memory (RAM) states (e.g., diver counts and exact $(x, y)$ coordinates) directly from the latent state $z$. The frozen encoder had not encountered states with 4--6 collected divers during its RL training, although these counts were included in the supervised probe training set. Figure~\ref{fig:probing_summary}(c) summarizes the clean probing results. The mean localization error of 12.44 pixels is measured in the original Atari screen coordinates and corresponds to less than 5 pixels in the encoder's $64\times64$ input space; part of this residual error may arise from the spatial and temporal mismatch between Atari RAM states and rendered sprites (Appendix~\ref{sec:appendix_ram_misalignment}).
+To assess prediction accuracy, we detached the pre-trained encoder and trained a lightweight multilayer perceptron (MLP) to predict ground-truth Random Access Memory (RAM) states (e.g., diver counts and exact $(x, y)$ coordinates) directly from the latent state $z$. The frozen encoder had not encountered states with 4--6 collected divers during its RL training, although these counts were included in the supervised probe training set. Figure~\ref{fig:probing_summary}(c) summarizes the clean probing results. The reported count accuracies are computed on the full probing dataset, including probe-training frames, and the 4--6 result pools those three classes. The mean localization error of 12.44 pixels is measured in the original Atari screen coordinates and corresponds to less than 5 pixels in the encoder's $64\times64$ input space; part of this residual error may arise from the spatial and temporal mismatch between Atari RAM states and rendered sprites (Appendix~\ref{sec:appendix_ram_misalignment}).
 
-We further measured how supervised decoding changes when the target bounding box is preserved and all pixels outside it are blended with uniform random noise (Figure~\ref{fig:background_noise_examples}(a)). For the visualization, only the igloo bounding box in Frostbite or the bottom-diver bounding box in Seaquest is preserved, and the same random pixel field is reused across noise strengths within each row. The quantitative sweep uses recorded observations without replacing igloo stages or diver counts. For each noise strength $\alpha\in\{0,0.1,0.2,0.4,0.6,0.8,1\}$, we kept the encoder frozen and trained a new MLP using observations corrupted at that strength; validation and final evaluation used the same corruption strength. Thus, the comparison measures decoding after training a separate probe for each corruption condition, rather than applying noise only at evaluation to a probe trained on clean inputs. At $\alpha=1$, overall accuracy changes from 99.52\% to 67.96\% in Seaquest and from 99.19\% to 28.26\% in Frostbite. The unweighted mean of class accuracies decreases from 96.29\% to 15.04\% and from 98.27\% to 9.07\%, respectively (Figure~\ref{fig:noise_probe_accuracy}(b)). These overall and class-average metrics are computed on the full probing dataset, including probe-training frames. The corresponding validation accuracies, used for checkpoint selection, decrease from 97.67\% to 68.00\% in Seaquest and from 96.76\% to 24.05\% in Frostbite. Appendix~\ref{subsec:appendix_noise_sweep} reports the complete protocol and every class at every strength.
-
-Accuracy decreases despite matching the noise strength between probe training and evaluation. However, corruption still changes the inputs seen by the frozen encoder relative to its RL training distribution. The experiment therefore measures the sensitivity of this encoder--probe procedure; it does not isolate spatial entanglement from encoder distribution shift, finite probe capacity, or optimization and data limitations.
-
-Adjacent diver counts have an average cosine similarity of 0.949, compared with 0.893 for pairs differing by three or more counts, while the maximum off-diagonal similarity across diver positions is 0.769. Together with clean probe classification accuracies of 92.4\% or higher (Figure~\ref{fig:probing_summary}), these results provide direct evidence that the latent states remain sensitive to and predictive of the evaluated task variables. These findings do not establish that all semantic information is preserved or that spatial entanglement is the sole bottleneck. Nevertheless, they suggest that poor reconstruction alone is insufficient to diagnose missing task-relevant information, motivating interventions that help downstream learners use the information available in these representations.
 
 \begin{figure}[t]
 \centering
@@ -170,7 +163,7 @@ Adjacent diver counts have an average cosine similarity of 0.949, compared with 
 
 \caption{
 (a--b) Pairwise cosine similarities of latent states when only the diver count or diver position is varied while the background is fixed.
-(c) Performance of supervised probes trained on frozen latent representations. Count accuracies are measured on the full probing dataset, including training frames; the 4--6 result pools those three classes.
+(c) Performance of supervised probes trained on frozen latent representations.
 }
 \label{fig:probing_summary}
 \end{figure}
@@ -192,16 +185,17 @@ Adjacent diver counts have an average cosine similarity of 0.949, compared with 
   {\small (b) Mean class accuracy}
 \end{minipage}
 
-\caption{
-Background corruption and supervised decoding.
-(a) Representative Frostbite and Seaquest observations across noise strengths $\alpha$.
-(b) Mean class accuracy of separately trained probes at each strength.
-Overall accuracy and full experimental details are reported in
-Appendix~\ref{subsec:appendix_noise_sweep}.
-}
+\caption{Background corruption and supervised decoding. (a) Representative Frostbite and Seaquest observations across noise strengths $\alpha$. (b) Mean class accuracy of separately trained probes at each strength.}
 \label{fig:background_noise_examples}
 \label{fig:noise_probe_accuracy}
 \end{figure}
+
+We further measured how supervised decoding changes when the target bounding box is preserved and all pixels outside it are blended with uniform random noise (Figure~\ref{fig:background_noise_examples}(a)). For the visualization, only the igloo bounding box in Frostbite or the bottom-diver bounding box in Seaquest is preserved, and the same random pixel field is reused across noise strengths within each row. The quantitative sweep uses recorded observations without replacing igloo stages or diver counts. For each noise strength $\alpha\in\{0,0.1,0.2,0.4,0.6,0.8,1\}$, we kept the encoder frozen and trained a new MLP using observations corrupted at that strength; validation and final evaluation used the same corruption strength. Thus, the comparison measures decoding after training a separate probe for each corruption condition, rather than applying noise only at evaluation to a probe trained on clean inputs. At $\alpha=1$, overall accuracy changes from 99.52\% to 67.96\% in Seaquest and from 99.19\% to 28.26\% in Frostbite. The unweighted mean of class accuracies decreases from 96.29\% to 15.04\% and from 98.27\% to 9.07\%, respectively (Figure~\ref{fig:noise_probe_accuracy}(b)). These overall and class-average metrics are computed on the full probing dataset, including probe-training frames. The corresponding validation accuracies, used for checkpoint selection, decrease from 97.67\% to 68.00\% in Seaquest and from 96.76\% to 24.05\% in Frostbite. Appendix~\ref{subsec:appendix_noise_sweep} reports the overall-accuracy curve, the complete protocol, and class-wise results at every strength.
+
+Accuracy decreases despite matching the noise strength between probe training and evaluation. However, corruption still changes the inputs seen by the frozen encoder relative to its RL training distribution. The experiment therefore measures the sensitivity of this encoder--probe procedure; it does not isolate spatial entanglement from encoder distribution shift, finite probe capacity, or optimization and data limitations.
+
+Adjacent diver counts have an average cosine similarity of 0.949, compared with 0.893 for pairs differing by three or more counts, while the maximum off-diagonal similarity across diver positions is 0.769. Together with clean probe classification accuracies of 92.4\% or higher (Figure~\ref{fig:probing_summary}), these results provide direct evidence that the latent states remain sensitive to and predictive of the evaluated task variables. These findings do not establish that all semantic information is preserved or that spatial entanglement is the sole bottleneck. Nevertheless, they suggest that poor reconstruction alone is insufficient to diagnose missing task-relevant information, motivating interventions that help downstream learners use the information available in these representations.
+
 
 
 \subsection{The Actor-Critic Optimization as an Intervention Point}
@@ -246,8 +240,7 @@ and analogously for $\Delta V$. For each time step $t$ in the sampled trajectori
 S_t = \text{ReLU}\!\left(\frac{\delta^{\text{TD}}_t - \bar{\mu}_e}{\sqrt{\bar{\sigma}^2_e} + \epsilon}\right) \cdot \text{softplus}\!\left(\frac{\Delta V_t - \bar{\mu}^{V}_e}{\sqrt{\bar{\sigma}^{2,V}_e} + \epsilon}\right).
 \label{eq:surprise}
 \end{equation}
-\todo{Relu, softplus 둘 다 refer/citation해서 설명하기}
-By pairing a strict ReLU with a softplus, this formulation guarantees that it will never fire unless the TD-error is above average when threshold is greater then 0, regardless of how much the value spikes. Conversely, an extremely large TD-error can still trigger the anchor even if the value decreases slightly. This captures the pivotal moments where a highly surprising or high-reward sub-trajectory is first discovered. For each trajectory sequence in the batch, when the maximum surprise score across its time steps exceeds the threshold ($\max_{t \in \text{seq}} S_t > \tau_z$), the corresponding buffer pointer (offset backwards by $\Delta_{\text{anchor}}$ steps to capture the critical preceding actions that caused the surprise; see Appendix~\ref{sec:appendix_causal_anchor} for architectural details) is registered as an active anchor $a = (p_{t^*+\Delta_\text{anchor}},\, e)$ where $t^* = \text{argmax}_{t \in \text{seq}} S_t$, in a first-in, first-out (FIFO) queue $\mathcal{A}$.
+Here, $\operatorname{ReLU}(x)=\max(0,x)$ denotes the rectified linear unit \citep{nair2010rectified}, while $\operatorname{softplus}(x)=\log(1+\exp(x))$ is its smooth approximation \citep{dugas2000incorporating}. By pairing ReLU with softplus, this formulation guarantees that it will never fire unless the TD-error is above average when $\tau_z > 0$, regardless of how much the value spikes. By pairing ReLU with softplus, this formulation guarantees that it will never fire unless the TD-error is above average when the threshold is greater than 0, regardless of how much the value spikes. This captures the pivotal moments where a highly surprising or high-reward sub-trajectory is first discovered. For each trajectory sequence in the batch, when the maximum surprise score across its time steps exceeds the threshold ($\max_{t \in \text{seq}} S_t > \tau_z$), the corresponding buffer pointer (offset backwards by $\Delta_{\text{anchor}}$ steps to capture the critical preceding actions that caused the surprise; see Appendix~\ref{sec:appendix_causal_anchor} for architectural details) is registered as an active anchor $a = (p_{t^*+\Delta_\text{anchor}},\, e)$ where $t^* = \text{argmax}_{t \in \text{seq}} S_t$, in a first-in, first-out (FIFO) queue $\mathcal{A}$.
 
 
 \subsection{Hash-Indexed Retrieval and Memory Maintenance}
@@ -314,7 +307,7 @@ Overall, the results show that the benefit of FLASH varies across environments.
 
 \begin{table}[!t]
 \centering
-\caption{Atari 100k performance. The ``+ours'' columns denote agents augmented with FLASH. Dashes indicate results not yet available.}
+\caption{Atari 100k performance. The ``+ours'' columns denote agents augmented with FLASH. Dashes indicate results not yet available. \todo{색상 바꾸고 차이 열 하나씩 추가}}
 \label{tab:main_performance}
 \resizebox{\textwidth}{!}{
 \begin{tabular}{lrrrrrrrr}
