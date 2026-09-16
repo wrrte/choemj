@@ -177,25 +177,32 @@ Adjacent diver counts have an average cosine similarity of 0.949, compared with 
 
 \begin{figure}[t]
 \centering
-% Overleaf: upload both PDFs into experiment/ next to the main TeX file.
 \begin{minipage}[t]{0.66\textwidth}
   \vspace{0pt}
   \centering
-  \includegraphics[width=\linewidth]{experiment/background_noise_examples.pdf}
+  \includegraphics[height=2.45cm,keepaspectratio]{experiment/background_noise_examples.pdf}
   \par\vspace{1mm}
   {\small (a) Background-noise examples}
 \end{minipage}\hfill
 \begin{minipage}[t]{0.32\textwidth}
   \vspace{0pt}
   \centering
-  \includegraphics[width=\linewidth]{experiment/noise_probe_mean_class_accuracy.pdf}
+  \includegraphics[height=2.45cm,keepaspectratio]{experiment/noise_probe_mean_class_accuracy.pdf}
   \par\vspace{1mm}
   {\small (b) Mean class accuracy}
 \end{minipage}
-\caption{Background corruption and supervised decoding. (a) Fixed observations from Frostbite (top, igloo stage 16) and Seaquest (bottom, five collected divers), with noise strengths $\alpha=0,0.1,0.2,0.4,0.6,0.8,1$. (b) Unweighted mean of class accuracies, using a separately trained probe at each strength and a fixed encoder per game. Accuracies use the full probing dataset, including training frames. Overall accuracy is reported in Appendix Figure~\ref{fig:noise_probe_overall_accuracy}.}
+
+\caption{
+Background corruption and supervised decoding.
+(a) Representative Frostbite and Seaquest observations across noise strengths $\alpha$.
+(b) Mean class accuracy of separately trained probes at each strength.
+Overall accuracy and full experimental details are reported in
+Appendix~\ref{subsec:appendix_noise_sweep}.
+}
 \label{fig:background_noise_examples}
 \label{fig:noise_probe_accuracy}
 \end{figure}
+
 
 \subsection{The Actor-Critic Optimization as an Intervention Point}
 \label{subsec:ac_intervention}
@@ -207,6 +214,11 @@ We therefore investigate whether selectively controlling experience reuse can im
 \label{sec:method}
 
 
+
+
+Building on the findings in Section~\ref{sec:representation}, we aim to improve downstream Actor-Critic learning by selectively reusing informative experiences together with past contexts that have similar latent structure. However, repeatedly searching the entire replay buffer for similar contexts would introduce substantial computational overhead, undermining the lightweight nature of this intervention. FLASH therefore maintains a hash-indexed episodic memory to efficiently identify candidate contexts with similar latent structure, selects salient anchors using a surprise score, and incorporates the retrieved groups into Actor-Critic training batches. We describe the method in three parts: surprise-guided anchor selection (Section~\ref{subsec:flash_retrieval}), hash-indexed retrieval and memory maintenance (Section~\ref{subsec:flash_memory}), and integration into Actor-Critic learning (Section~\ref{subsec:flash_learning}). The complete FLASH procedure is summarized in Appendix~\ref{app:flash_algorithm}.
+
+
 \begin{figure}[t]
 \centering
 \includegraphics[width=\textwidth]{pipeline.pdf}
@@ -214,8 +226,6 @@ We therefore investigate whether selectively controlling experience reuse can im
 \label{fig:flash_pipeline}
 \end{figure}
 
-
-Building on the findings in Section~\ref{sec:representation}, we aim to improve downstream Actor-Critic learning by selectively reusing informative experiences together with past contexts that have similar latent structure. However, repeatedly searching the entire replay buffer for similar contexts would introduce substantial computational overhead, undermining the lightweight nature of this intervention. FLASH therefore maintains a hash-indexed episodic memory to efficiently identify candidate contexts with similar latent structure, selects salient anchors using a surprise score, and incorporates the retrieved groups into Actor-Critic training batches. We describe the method in three parts: surprise-guided anchor selection (Section~\ref{subsec:flash_retrieval}), hash-indexed retrieval and memory maintenance (Section~\ref{subsec:flash_memory}), and integration into Actor-Critic learning (Section~\ref{subsec:flash_learning}). The complete FLASH procedure is summarized in Appendix~\ref{app:flash_algorithm}.
 
 \subsection{Surprise-Guided Anchor Selection}
 \label{subsec:flash_retrieval}
