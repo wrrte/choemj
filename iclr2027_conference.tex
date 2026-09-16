@@ -293,9 +293,7 @@ In our experiments, we set the retrieval warmup to $T_{\text{warm}} = T/2 = 50,0
 \label{sec:experiments}
 
 \subsection{Experimental Setup}
-We evaluate our method across all 26 games of the Atari 100k benchmark. For each game and method, we train four independent runs with different training seeds and evaluate each final checkpoint over 20 evaluation seeds. We first average the 20 evaluation returns within each training run and then report the mean across the four training seeds, giving each training run equal weight. For each training seed, the baseline and FLASH-augmented agents are run on the same GPU under the same software environment, and are evaluated using the same set of evaluation seeds. This paired protocol minimizes variation due to hardware, software, and evaluation randomness. Further details of the evaluation protocol and hardware assignment are provided in Appendix~X.
-
-\todo{add appendix and refer}
+We evaluate our method across all 26 games of the Atari 100k benchmark. For each game and method, we train four independent runs with different training seeds and evaluate each final checkpoint over 20 evaluation seeds. We first average the 20 evaluation returns within each training run and then report the mean across the four training seeds, giving each training run equal weight. For each training seed, the baseline and FLASH-augmented agents are run on the same GPU under the same software environment, and are evaluated using the same set of evaluation seeds. This paired protocol minimizes variation due to hardware, software, and evaluation randomness. Further details of the evaluation protocol and hardware assignment are provided in Appendix~\ref{app:experimental_protocol}.
 
 \subsection{Main Performance}
 Table~\ref{tab:main_performance} presents the comprehensive Atari 100k results. 
@@ -436,6 +434,11 @@ In this paper, we investigated whether downstream Actor-Critic learning can make
 \bibliographystyle{iclr2027_conference}
 
 \appendix
+
+\section{Detailed Experimental Protocol and Hardware Assignment}
+\label{app:experimental_protocol}
+
+\todo{fill}
 
 \section{Across-Seed Analysis of Exploitation in Frostbite}
 \label{sec:appendix_exploitation}
