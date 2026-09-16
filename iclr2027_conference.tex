@@ -119,7 +119,11 @@ Here, we use blurry only to describe the visual appearance of decoded images, no
 
 To formally investigate whether standard lightweight encoders successfully capture functionally critical elements, we conducted extensive probing experiments on the Seaquest environment. First, using images with perfectly identical backgrounds varying only the target elements, we observed that the pairwise cosine similarities of latent states encoding different diver counts and positions were strictly less than 1.0 (dropping to $0.86$ and $0.63$, respectively). This suggests sensitivity to changes in these target regions, motivating a direct test of whether a supervised probe can predict the corresponding task variables from latent states.
 
-To assess prediction accuracy, we detached the pre-trained encoder and trained a lightweight multilayer perceptron (MLP) to predict ground-truth Random Access Memory (RAM) states (e.g., diver counts and exact $(x, y)$ coordinates) directly from the latent state $z$. The frozen encoder had not encountered states with 4--6 collected divers during its RL training, although these counts were included in the supervised probe training set. Figure~\ref{fig:probing_summary}(c) summarizes the clean probing results. The mean localization error of 12.44 pixels is measured in the original Atari screen coordinates and corresponds to less than 5 pixels in the encoder's $64\times64$ input space; part of this residual error may arise from the spatial and temporal mismatch between Atari RAM states and rendered sprites (Appendix~\ref{sec:appendix_ram_misalignment}). However, when we injected extreme uniform noise into the background spaces while leaving only the target bounding box intact, the classification accuracy dropped substantially (e.g., from 99.6\% to 68.1\% in Seaquest). \todo{noise strength를 여러 단계로 바꾸면서 performance가 어떻게 떨어지는지 graph 그려야함. 글고 noise classification은 노이즈 상태에서 학습된 거니깐 잘못된 설명 수정해야함.} This drop indicates that the encoder--probe pipeline is sensitive to background corruption. It is consistent with spatial entanglement, but extreme noise also introduces a distribution shift, so this experiment alone does not isolate the cause of the degradation.
+To assess prediction accuracy, we detached the pre-trained encoder and trained a lightweight multilayer perceptron (MLP) to predict ground-truth Random Access Memory (RAM) states (e.g., diver counts and exact $(x, y)$ coordinates) directly from the latent state $z$. The frozen encoder had not encountered states with 4--6 collected divers during its RL training, although these counts were included in the supervised probe training set. Figure~\ref{fig:probing_summary}(c) summarizes the clean probing results. The mean localization error of 12.44 pixels is measured in the original Atari screen coordinates and corresponds to less than 5 pixels in the encoder's $64\times64$ input space; part of this residual error may arise from the spatial and temporal mismatch between Atari RAM states and rendered sprites (Appendix~\ref{sec:appendix_ram_misalignment}).
+
+We further measured how supervised decoding changes when the target bounding box is preserved and all pixels outside it are blended with uniform random noise (Figure~\ref{fig:background_noise_examples}). For each noise strength $\alpha\in\{0,0.1,0.2,0.4,0.6,0.8,1\}$, we kept the encoder frozen and trained a new MLP using observations corrupted at that strength; validation and final evaluation used the same corruption strength. Thus, the comparison measures decoding after training a separate probe for each corruption condition, rather than applying noise only at evaluation to a probe trained on clean inputs. At $\alpha=1$, overall accuracy changes from 99.52\% to 67.96\% in Seaquest and from 99.19\% to 28.26\% in Frostbite. The unweighted mean of class accuracies decreases from 96.29\% to 15.04\% and from 98.27\% to 9.07\%, respectively (Figure~\ref{fig:noise_probe_accuracy}). These overall and class-average metrics are computed on the full probing dataset, including probe-training frames. The corresponding validation accuracies, used for checkpoint selection, decrease from 97.67\% to 68.00\% in Seaquest and from 96.76\% to 24.05\% in Frostbite. Appendix~\ref{subsec:appendix_noise_sweep} reports the complete protocol and every class at every strength.
+
+Accuracy decreases despite matching the noise strength between probe training and evaluation. However, corruption still changes the inputs seen by the frozen encoder relative to its RL training distribution. The experiment therefore measures the sensitivity of this encoder--probe procedure; it does not isolate spatial entanglement from encoder distribution shift, finite probe capacity, or optimization and data limitations.
 
 Adjacent diver counts have an average cosine similarity of 0.949, compared with 0.893 for pairs differing by three or more counts, while the maximum off-diagonal similarity across diver positions is 0.769. Together with clean probe classification accuracies of 92.4\% or higher (Figure~\ref{fig:probing_summary}), these results provide direct evidence that the latent states remain sensitive to and predictive of the evaluated task variables. These findings do not establish that all semantic information is preserved or that spatial entanglement is the sole bottleneck. Nevertheless, they suggest that poor reconstruction alone is insufficient to diagnose missing task-relevant information, motivating interventions that help downstream learners use the information available in these representations.
 
@@ -153,8 +157,8 @@ Adjacent diver counts have an average cosine similarity of 0.949, compared with 
     \hline
     \textbf{Target} & \textbf{Metric} & \textbf{Result} \\
     \hline
-    Count (0--6) & Acc. & 99.6\% \\
-    Count (4--6) & Acc. & $>$93\% \\
+    Count (0--6) & Acc. & 99.5\% \\
+    Count (4--6) & Acc. & 95.7\% \\
     Presence & Acc. & 92.4\% \\
     Position & Mean error & 12.44 px \\
     \hline
@@ -166,9 +170,25 @@ Adjacent diver counts have an average cosine similarity of 0.949, compared with 
 
 \caption{
 (a--b) Pairwise cosine similarities of latent states when only the diver count or diver position is varied while the background is fixed.
-(c) Performance of supervised probes trained on frozen latent representations.
+(c) Performance of supervised probes trained on frozen latent representations. Count accuracies are measured on the full probing dataset, including training frames; the 4--6 result pools those three classes.
 }
 \label{fig:probing_summary}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+% Overleaf: upload background_noise_examples.png into experiment/ next to the main TeX file.
+\includegraphics[width=\linewidth]{experiment/background_noise_examples.png}
+\caption{Background-noise application to actual $64\times64$ observations from Frostbite (top) and Seaquest (bottom). Each row uses one fixed observation; columns show illustrative strengths $\alpha=0,0.25,0.5,0.75,1$. Only the igloo bounding box or the bottom-diver bounding box is preserved. The same random pixel field is used across strengths within each row, and images are enlarged with nearest-neighbor interpolation. No target-stage or diver-count replacement is applied. These illustrative strengths differ from the seven strengths used for the quantitative sweep.}
+\label{fig:background_noise_examples}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+% Overleaf: upload experiment/noise_probe_accuracy.pdf.
+\includegraphics[width=\linewidth]{experiment/noise_probe_accuracy.pdf}
+\caption{Noise-strength sweep with a separately trained probe at each strength and a fixed encoder per game. (a) Overall accuracy, weighted by class frequency. (b) Unweighted mean of class accuracies. Both metrics use the full probing dataset, including probe-training frames. Each point represents one probe training run with seed 42; connecting lines are visual guides, not additional measurements. Validation results and all class-wise accuracies are given in Appendix~\ref{subsec:appendix_noise_sweep}.}
+\label{fig:noise_probe_accuracy}
 \end{figure}
 
 \subsection{The Actor-Critic Optimization as an Intervention Point}
@@ -286,9 +306,9 @@ Overall, the results show that the benefit of FLASH varies across environments.
 Game & Random & Human & STORM & STORM+ours & DRAMA & DRAMA+ours & EDELINE & EDELINE+ours \\
 \midrule
 Alien         & 227.8 & 7127.7 & 1041.8 & \textcolor{blue}{1091.1} & 1051.5 & \textcolor{red}{972.2} & - & -  \\
-Amidar        & 5.8 & 1719.5 & 175.9 & \textcolor{red}{150.5} & 119.2 & \textcolor{red}{\textbf{101.2}} & - & -  \\
+Amidar        & 5.8 & 1719.5 & 175.9 & \textcolor{red}{150.5} & 108.0 & \textcolor{blue}{115.2} & - & -  \\
 Assault       & 222.4 & 742.0 & 643.7 & \textcolor{blue}{693.0} & 393.7 & \textcolor{blue}{\textbf{456.4}} & - & -  \\
-Asterix       & 210.0 & 8503.3 & 546.2 & \textcolor{blue}{572.5} & 1741.7 & \textcolor{red}{\textbf{1446.7}} & - & -  \\
+Asterix       & 210.0 & 8503.3 & 546.2 & \textcolor{blue}{572.5} & 1680 & \textcolor{red}{\textbf{1397.5}} & - & -  \\
 BankHeist     & 14.2 & 753.1 & 163 & \textcolor{blue}{169.5} & - & - & - & -  \\
 BattleZone    & 2360.0 & 37187.5 & 10575 & \textcolor{blue}{10608.3} & 11450 & \textcolor{red}{9900} & - & -  \\
 Boxing        & 0.1 & 12.1 & 74.8 & \textcolor{blue}{77.3} & 83.7 & \textcolor{red}{76.4} & - & -  \\
@@ -306,17 +326,17 @@ Krull         & 1598.0 & 2665.5 & 5608 & \textcolor{blue}{5915.2} & 9836 & \text
 KungFuMaster  & 258.5 & 22736.3 & 25137.5 & \textcolor{blue}{25177.5} & 20000 & \textcolor{blue}{20200} & - & -  \\
 MsPacman      & 307.3 & 6951.6 & - & - & 2968.5 & \textcolor{blue}{2980} & - & -  \\
 Pong          & -20.7 & 14.6 & 6.5 & \textcolor{blue}{\textbf{10.8}} & 20 & 20 & - & -  \\
-PrivateEye    & 24.9 & 69571.3 & - & - & 100 & \textcolor{red}{\textbf{-80}} & - & -  \\
+PrivateEye    & 24.9 & 69571.3 & - & - & 100 & \textcolor{red}{\textbf{10}} & - & -  \\
 Qbert         & 163.9 & 13455.0 & 2875.2 & \textcolor{blue}{2920.2} & 633.8 & \textcolor{blue}{\textbf{801.2}} & - & -  \\
 RoadRunner    & 11.5 & 7845.0 & - & - & 7445 & \textcolor{blue}{8510} & - & -  \\
-Seaquest      & 68.4 & 42054.7 & - & - & - & - & - & -  \\
+Seaquest      & 68.4 & 42054.7 & - & - & 432 & \textcolor{blue}{474} & - & -  \\
 UpNDown       & 533.4 & 11693.2 & 5022 & \textcolor{blue}{5225.2} & 4661.5 & \textcolor{blue}{5158.5} & - & -  \\
 \midrule
 \#Superhuman ($\uparrow$) & 0 & N/A & 5  & 5 & 5 & \textcolor{blue}{\textbf{6}} & -  & -  \\
-Mean ($\uparrow$) & 0.000 & 1.000 & 0.964  & \textcolor{blue}{1.000} & 1.140 & \textcolor{red}{1.093} & -  & -  \\
-Median ($\uparrow$) & 0.000 & 1.000 & 0.405  & \textcolor{blue}{0.416} & 0.350 & \textcolor{blue}{\textbf{0.408}} & -  & -  \\
-IQM ($\uparrow$) & 0.000 & 1.000 & 0.431  & \textcolor{blue}{0.467} & 0.423 & \textcolor{blue}{0.444} & -  & -  \\
-Optimality Gap ($\downarrow$) & 1.000 & 0.000 & 0.514  & \textcolor{blue}{0.500} & 0.533 & \textcolor{blue}{0.526} & -  & -  \\
+Mean ($\uparrow$) & 0.000 & 1.000 & 0.964  & \textcolor{blue}{1.000} & 1.091 & \textcolor{red}{1.046} & -  & -  \\
+Median ($\uparrow$) & 0.000 & 1.000 & 0.405  & \textcolor{blue}{0.416} & 0.330 & \textcolor{blue}{\textbf{0.402}} & -  & -  \\
+IQM ($\uparrow$) & 0.000 & 1.000 & 0.431  & \textcolor{blue}{0.467} & 0.396 & \textcolor{blue}{0.416} & -  & -  \\
+Optimality Gap ($\downarrow$) & 1.000 & 0.000 & 0.514  & \textcolor{blue}{0.500} & 0.554 & \textcolor{blue}{0.546} & -  & -  \\
 \bottomrule
 \end{tabular}
 }
@@ -401,7 +421,7 @@ To validate the core components of our approach, we conducted ablation studies t
 
 \section{Conclusion}
 \label{sec:conclusion}
-In this paper, we investigated whether downstream Actor-Critic learning can make better use of imperfect latent states in visual RL. Our probing experiments indicate that lightweight encoders retain selected task-relevant information despite poor visual reconstruction, although probe accuracy degrades under background corruption. Motivated by these findings, we proposed FLASH, a retrieval module that incorporates selected anchors and structurally similar past experiences into Actor-Critic training without changing the encoder architecture. The reported Atari 100k results show improvements in aggregate performance for the evaluated baselines, with benefits varying across environments. For STORM, the measured training time overhead is 5.11--7.41\% (11--22 additional minutes) over the full 100k-step training budget across three GPUs (Table~\ref{tab:efficiency}). Together, these findings suggest that targeted experience reuse can improve downstream exploitation of the information available in imperfect latent states, complementing efforts to improve representation quality.
+In this paper, we investigated whether downstream Actor-Critic learning can make better use of imperfect latent states in visual RL. Our probing experiments indicate that lightweight encoders retain selected task-relevant information despite poor visual reconstruction, although decoding accuracy degrades under background corruption even when a separate probe is trained at each corruption strength. Motivated by these findings, we proposed FLASH, a retrieval module that incorporates selected anchors and structurally similar past experiences into Actor-Critic training without changing the encoder architecture. The reported Atari 100k results show improvements in aggregate performance for the evaluated baselines, with benefits varying across environments. For STORM, the measured training time overhead is 5.11--7.41\% (11--22 additional minutes) over the full 100k-step training budget across three GPUs (Table~\ref{tab:efficiency}). Together, these findings suggest that targeted experience reuse can improve downstream exploitation of the information available in imperfect latent states, complementing efforts to improve representation quality.
 
 \bibliography{iclr2027_conference}
 \bibliographystyle{iclr2027_conference}
@@ -588,13 +608,13 @@ The default construction achieved higher performance than the alternative (\todo
 
 \section{Probing Accuracy of the FLASH Encoder}
 \label{sec:appendix_noise_robustness_flash}
-To examine whether the observed value-function improvements are accompanied by changes in encoder probing robustness, we repeated the spatial noise robustness evaluation (from Section \ref{sec:representation}) on the FLASH encoder.
+We also retain an earlier two-condition probing experiment on the FLASH encoder. The encoder was frozen, and separate MLPs were trained on clean observations and observations with complete background replacement by uniform noise. Each MLP was validated and evaluated under its own training corruption condition. These are separate runs from the baseline noise-strength sweep in Appendix~\ref{subsec:appendix_noise_sweep}.
 
-As shown in Table \ref{tab:per_class_noise_flash}, the FLASH encoder exhibits nearly identical behavior to the Baseline encoder. Under clean conditions, a probe classifies the igloo construction stage (0--16) from latent states with 99.1\% accuracy. However, upon injecting background noise, the probing accuracy catastrophically drops to 27.2\%, showing similar sensitivity to background corruption as the Baseline (which dropped to 27.7\%). These results suggest that the value-function improvements (Section~\ref{subsec:robustness_value}) need not be accompanied by improved encoder probing robustness, consistent with better downstream utilization of the available representations.
+As shown in Table~\ref{tab:per_class_noise_flash}, the clean-trained FLASH probe achieves 99.08\% full-dataset accuracy, while the separately noise-trained probe achieves 27.18\%; their best validation accuracies are 97.03\% and 25.41\%. These runs use the 100,000-step checkpoint from \texttt{\detokenize{Frostbite-life_done-wm_2L512D8H-100k-seed3710_O}}, the same 1,854-frame dataset, 50 epochs, a batch size of 256, and learning rate $10^{-3}$. The earlier baseline endpoint runs attained 99.19\% and 27.72\% with learning rate $5\times10^{-3}$. The broadly similar endpoint pattern provides no evidence here for improved decoding under background noise with FLASH, but the differing learning rates and absence of a FLASH strength sweep preclude a controlled estimate of an encoder-robustness difference. This diagnostic also does not establish the mechanism behind the value-function results in Section~\ref{subsec:robustness_value}.
 
 \begin{table}[!t]
     \centering
-    \caption{Per-class classification accuracy for igloo construction stages (0--16) in Frostbite using the FLASH encoder. The results mirror the Baseline, indicating that the encoder--probe pipeline remains sensitive to background corruption.}
+    \caption{Earlier FLASH-encoder endpoint experiment in Frostbite. Clean and noisy columns come from separately trained MLPs; noise is present during both training and evaluation of the noisy probe. All entries use the full dataset, including probe-training frames, and are separate from the baseline strength sweep.}
     \label{tab:per_class_noise_flash}
     \begin{tabular}{crrr}
         \toprule
@@ -816,68 +836,136 @@ As shown in Figure~\ref{fig:probing_summary}(a--b), both heatmaps reveal distinc
 \label{subsec:appendix_probing_latent}
 To examine whether a lightweight MLP can predict diver counts and positions from the latent state $z$, we conducted a probing experiment on the Seaquest environment. We used an encoder trained in a run that never encountered states with 4 to 6 collected divers. We froze this encoder and trained the MLP to predict ground-truth RAM states directly from $z$. To evaluate count prediction for states absent from encoder training, we used the frozen encoder to extract latents from manually collected demonstrations containing 4 to 6 collected divers. We combined these latents with those from newly collected rollouts from the same run (entirely independent of the encoder's original replay buffer) to construct the probing dataset. The probing MLP was trained on labeled examples spanning all counts from 0 to 6, including the demonstrations with 4 to 6 divers.
 
-First, for classifying the number of collected divers at the bottom (0 to 6), the probe achieved an overall accuracy of 99.6\%. The MLP also predicted counts of 4 to 6 with $>93\%$ accuracy after supervised training on examples that included these counts, using latent representations from the frozen encoder. These results suggest that the representations support supervised count prediction even for count values absent from encoder training.
+First, for classifying the number of collected divers at the bottom (0 to 6), the clean probe achieved 99.52\% accuracy over all 59,077 frames, including its training frames, and 97.67\% best validation accuracy. Over the 673 frames with counts 4--6, its pooled full-dataset accuracy was 95.69\% (644 correct); individual class accuracies were 95.89\%, 96.88\%, and 90.91\%, respectively. The MLP was supervised on examples containing these counts. These results describe supervised decoding from the frozen encoder, not zero-shot generalization by the MLP to unseen labels.
 
 Second, we tasked the probe with predicting the exact $(x, y)$ coordinates of multiple dynamic divers swimming on the screen. Since up to 4 divers can appear simultaneously, simply assigning fixed output slots to specific lanes introduces a structural bias. To ensure a strictly fair evaluation, we formulated this as a Set Prediction problem and employed a Permutation-Invariant Bipartite Matching Loss, inspired by modern object detection frameworks like DETR. The MLP was forced to output an unordered set of 4 object predictions (presence probability and coordinates), which were then optimally matched to the ground-truth divers via Hungarian matching. Using this rigorous setup, the probe achieved $92.4\%$ accuracy for predicting diver presence, and an average spatial error of $12.44$ pixels for pinpointing their precise $(x, y)$ locations. These results show that the MLP can use latent states to predict object presence and location on the evaluated data, despite poor visual reconstruction. They do not establish complete information preservation or a disentangled representation.
 
 It is important to acknowledge that the Atari 2600 emulator exhibits an intrinsic temporal and spatial misalignment between the internal RAM state and the rendered visual frame. For instance, when the submarine collects a diver, the RAM counter increments immediately, but the visual rendering of the diver often persists on the screen for an additional frame before being visually absorbed. Similarly, minor discrepancies exist between the exact pixel locations of moving sprites and their corresponding RAM values due to the Atari hardware's rendering cycle. These hardware-level asynchronies impose an irreducible upper bound on probing accuracy. These mismatches may contribute to the residual probing errors (see Appendix \ref{sec:appendix_ram_misalignment} for visual examples). However, the present experiments do not quantify their contribution or rule out information loss and limitations of the probe as additional sources of error.
 
-\subsection{Robustness to Spatial Noise: Assessing Background Sensitivity}
-DIAMOND \citep{alonso2024diffusion} notes that compression into discrete latent representations may lose task-relevant visual details and reports visual inconsistencies between frames imagined by IRIS. Our analysis separately examines whether supervised probes can predict selected task variables from latent states and whether their predictions are sensitive to changes outside the target region. To assess this background sensitivity, we injected extreme random uniform noise into the background spaces of the original observations, leaving only the bounding box of the target objects perfectly intact. We conducted this experiment across two distinct domains: classifying the number of bottom divers in Seaquest, and classifying the igloo construction stages (0--16 blocks) in Frostbite. (For full details on the MLP training procedure and rigorous evaluation setup, see Section~\ref{subsec:appendix_probing_latent}.)
+\subsection{Background-Noise Strength Sweep with Separately Trained Probes}
+\label{subsec:appendix_noise_sweep}
+We quantify how well a supervised probe can decode a target whose pixels remain intact when the rest of the image is corrupted. For each game, the encoder is fixed across all seven noise strengths, while a new MLP is trained at each strength. Both probe-training and validation inputs have the same corruption strength as the final evaluation inputs. The quantitative sweep uses recorded observations without replacing igloo stages or diver counts; template-based stage replacement belongs to the separate critic analysis in Appendix~\ref{sec:appendix_value_robustness}.
 
-To assess sensitivity to changes outside the target region, we evaluated the probing MLP on these noise-injected images and observed a substantial accuracy drop. As detailed in Table~\ref{tab:per_class_noise}, in Seaquest, accuracy dropped from $99.6\%$ (clean) to $68.1\%$ (effectively random chance, as it converged to predicting the majority class). We observed an even more dramatic collapse in Frostbite (Table~\ref{tab:per_class_noise_frostbite}), where the accuracy for predicting the igloo stage fell from a pristine $99.2\%$ down to $27.7\%$ upon background noise injection. These results show that the encoder--probe pipeline is sensitive to background corruption, consistent with spatial entanglement. However, because extreme noise introduces a substantial distribution shift, the experiment does not distinguish encoder sensitivity from limitations in probe generalization, nor establish that spatial entanglement is the sole explanation.
+\paragraph{Data and labels.}
+Frostbite uses 1,854 observations from \path{probing_data/Frostbite_20260822_201417.npz}, covering all 17 igloo stages. The label is 0 when RAM byte 77 equals 255, and otherwise equals that byte plus one. Seaquest combines 57,604 observations from \path{probing_data/Seaquest-life_done-wm_2L512D8H-100k-seed1_X_probing.npz} with 1,473 observations from \path{probing_data/Seaquest_20260822_133245.npz}, for 59,077 observations in total. RAM byte 62 gives the collected-diver count (0--6). The first Seaquest file contains counts 0--2; the additional file supplies examples spanning 0--6. Each observation is a $64\times64$ RGB image stored as unsigned 8-bit pixels, paired with its RAM state. The class counts are reported in Tables~\ref{tab:per_class_noise_frostbite} and~\ref{tab:per_class_noise}.
+
+\paragraph{Frozen encoders and probe optimization.}
+We use world-model checkpoints at 100,000 environment steps from \path{Frostbite-life_done-wm_2L512D8H-100k-seed3710} and \path{Seaquest-life_done-wm_2L512D8H-100k-seed1_X}. The world model is set to evaluation mode and its parameters are frozen. Latents are extracted with deterministic categorical mode selection (\texttt{sample\_mode=mode}), yielding 1,024 input features. The probe is an MLP with widths $1024\rightarrow256\rightarrow64\rightarrow K$, with ReLU after each hidden layer and $K=17$ or 7. Each condition trains a fresh probe for 50 epochs using Adam, unweighted cross-entropy, and learning rate $0.005$. Batch sizes are 256 for Frostbite and 4,096 for Seaquest. Probe initialization, minibatch shuffling, and data splitting use seed 42. The training budget and other hyperparameters are held fixed across strengths within each game.
+
+\paragraph{Corruption operator and preserved regions.}
+For original pixel $I_{p,c}$ at location $p$ and color channel $c$, draw $U_{p,c}$ independently from the discrete uniform distribution on $\{0,\ldots,255\}$. If $B$ is the preserved bounding box, the input at strength $\alpha$ is
+\begin{equation}
+\widetilde I_{p,c}^{(\alpha)} =
+\begin{cases}
+I_{p,c}, & p\in B,\\
+\operatorname{round}\!\left((1-\alpha)I_{p,c}+\alpha U_{p,c}\right), & p\notin B.
+\end{cases}
+\label{eq:probe_background_noise}
+\end{equation}
+The implementation uses float32 mixing, NumPy rounding to the nearest integer, clipping to $[0,255]$, and conversion back to unsigned 8-bit pixels; it then copies the original target pixels exactly. The resulting image is divided by 255 before encoding. Strength 0 leaves the observation unchanged, and strength 1 completely replaces pixels outside $B$ with uniform noise. In zero-based input coordinates with exclusive upper bounds, $B$ is $42\leq x<58$, $10\leq y<17$ in Frostbite (a $16\times7$ region), and $18\leq x<46$, $53\leq y<57$ in Seaquest (a $28\times4$ region). ``Background'' here denotes every pixel outside this box, including other objects and interface elements.
+
+We evaluate $\alpha\in\{0,0.1,0.2,0.4,0.6,0.8,1\}$. A separate NumPy random-number generator with seed 42 produces the noise, preserving the same random pixel field for each observation across strengths without consuming the random state used for the data split. Corruption is applied once before latent extraction and train/validation splitting. Each frame therefore retains its sampled corruption throughout training and evaluation; noise is not resampled at every epoch. Original RAM labels are retained. Figure~\ref{fig:background_noise_examples} illustrates the operator using separate display examples, rather than the full set of evaluated observations.
+
+\paragraph{Splits, checkpoint selection, and metric definitions.}
+A random permutation of frames assigns $\lfloor0.2N\rfloor$ frames to validation and the remainder to training: 370/1,484 in Frostbite and 11,815/47,262 in Seaquest (validation/training). Within a game, the same split is used at every strength. The MLP checkpoint with the highest validation accuracy across the 50 epochs is selected. All per-class results and the overall and class-average curves below are then computed on the \emph{full dataset}, which includes the training frames. They are not held-out test accuracies. We separately report the best validation accuracy used for checkpoint selection; that validation set is also not an independent final test set. Splitting is by frame rather than by episode, so nearby frames from the same trajectory can occur in both partitions.
+
+For class $c$, let $N_c$ be its full-dataset sample count and $C_c$ its number of correct predictions. Its class-conditional accuracy is $a_c=100C_c/N_c$. Overall accuracy is $100\sum_c C_c/\sum_c N_c$, while mean class accuracy is the unweighted mean $K^{-1}\sum_c a_c$ (balanced accuracy). Thus, classes contribute in proportion to frequency to the overall metric, but equally to the class mean. There is one frozen encoder checkpoint per game and one probe-training run per strength, all with seed 42; no across-seed confidence intervals are estimated. The saved JSON files contain full-dataset class counts and accuracies, but not validation accuracies broken down by class.
+
+\paragraph{Results at every noise strength.}
+Table~\ref{tab:noise_sweep_summary} reports both full-dataset aggregates and the selected validation accuracy for every condition. Tables~\ref{tab:per_class_noise_frostbite} and~\ref{tab:per_class_noise} report all 119 Frostbite and 49 Seaquest class--strength combinations. Percentages are rounded to two decimal places; aggregates are computed from unrounded counts or class accuracies.
 
 \begin{table}[!t]
-    \centering
-    \caption{Per-class classification accuracy for bottom diver counting in Seaquest. The clean setting uses the uncorrupted $64 \times 64$ observation, while the noisy setting injects uniform random noise everywhere except the tight bounding box containing the divers. The drop in minority class accuracy indicates sensitivity of the encoder--probe pipeline to background corruption.}
-    \label{tab:per_class_noise}
-    \begin{tabular}{crrr}
-        \toprule
-        \textbf{Diver Count} & \textbf{Samples ($n$)} & \textbf{Clean Accuracy (\%)} & \textbf{Noisy Accuracy (\%)} \\
-        \midrule
-        0 & $39,767$ & $99.8$ & $96.9$ \\
-        1 & $17,003$ & $99.3$ & $9.8$ \\
-        2 & $1,374$ & $95.8$ & $0.0$ \\
-        3 & $260$ & $95.4$ & $0.0$ \\
-        4 & $146$ & $95.9$ & $0.0$ \\
-        5 & $417$ & $96.9$ & $0.0$ \\
-        6 & $110$ & $90.9$ & $0.0$ \\
-        \midrule
-        \textbf{Overall} & \textbf{59,077} & \textbf{99.5} & \textbf{68.1} \\
-        \bottomrule
-    \end{tabular}
+\centering
+\small
+\setlength{\tabcolsep}{5pt}
+\caption{Complete noise-strength sweep (percent). Overall and mean class accuracy use the full dataset, including training frames. Best validation accuracy is the maximum over epochs used to select the probe. Each condition trains a separate MLP at the indicated noise strength.}
+\label{tab:noise_sweep_summary}
+\begin{tabular}{crrrrrr}
+\toprule
+& \multicolumn{3}{c}{Frostbite} & \multicolumn{3}{c}{Seaquest} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+$\alpha$ & Overall & Class mean & Best val. & Overall & Class mean & Best val. \\
+\midrule
+0.0 & 99.19 & 98.27 & 96.76 & 99.52 & 96.29 & 97.67 \\
+0.1 & 98.65 & 96.65 & 95.14 & 99.30 & 95.02 & 96.59 \\
+0.2 & 97.52 & 96.02 & 87.57 & 93.52 & 47.86 & 91.32 \\
+0.4 & 71.63 & 59.04 & 51.08 & 79.87 & 22.19 & 79.40 \\
+0.6 & 36.62 & 14.75 & 30.27 & 72.65 & 18.62 & 72.61 \\
+0.8 & 29.61 & 9.70 & 25.95 & 69.35 & 16.55 & 69.22 \\
+1.0 & 28.26 & 9.07 & 24.05 & 67.96 & 15.04 & 68.00 \\
+\bottomrule
+\end{tabular}
 \end{table}
 
 \begin{table}[!t]
-    \centering
-    \caption{Per-class classification accuracy for igloo construction stages (0--16) in Frostbite. Similar to Seaquest, injecting background noise outside the igloo bounding box severely degrades the probing accuracy, indicating sensitivity of the encoder--probe pipeline to changes outside the target region.}
-    \label{tab:per_class_noise_frostbite}
-    \begin{tabular}{crrr}
-        \toprule
-        \textbf{Igloo Stage} & \textbf{Samples ($n$)} & \textbf{Clean Accuracy (\%)} & \textbf{Noisy Accuracy (\%)} \\
-        \midrule
-        0 & $153$ & $99.3$ & $0.0$ \\
-        1 & $26$ & $96.2$ & $0.0$ \\
-        2 & $25$ & $92.0$ & $0.0$ \\
-        3 & $28$ & $100.0$ & $0.0$ \\
-        4 & $77$ & $98.7$ & $0.0$ \\
-        5 & $54$ & $100.0$ & $0.0$ \\
-        6 & $159$ & $100.0$ & $0.6$ \\
-        7 & $377$ & $99.7$ & $75.6$ \\
-        8 & $95$ & $98.9$ & $0.0$ \\
-        9 & $91$ & $98.9$ & $0.0$ \\
-        10 & $121$ & $100.0$ & $0.0$ \\
-        11 & $120$ & $98.3$ & $0.0$ \\
-        12 & $47$ & $97.9$ & $0.0$ \\
-        13 & $89$ & $97.8$ & $0.0$ \\
-        14 & $28$ & $92.9$ & $0.0$ \\
-        15 & $70$ & $100.0$ & $0.0$ \\
-        16 & $294$ & $100.0$ & $77.6$ \\
-        \midrule
-        \textbf{Overall} & \textbf{1,854} & \textbf{99.2} & \textbf{27.7} \\
-        \bottomrule
-    \end{tabular}
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\caption{Frostbite: every class at every noise strength. Entries are class-conditional accuracies (percent) over the full dataset, including probe-training frames. The count $N_c$ is unchanged across columns. Each column uses a separately trained MLP.}
+\label{tab:per_class_noise_frostbite}
+\begin{tabular}{crrrrrrrr}
+\toprule
+Igloo stage & $N_c$ & $\alpha=0$ & $0.1$ & $0.2$ & $0.4$ & $0.6$ & $0.8$ & $1.0$ \\
+\midrule
+0 & 153 & 99.35 & 98.69 & 98.04 & 73.86 & 32.03 & 0.00 & 0.00 \\
+1 & 26 & 96.15 & 92.31 & 100.00 & 11.54 & 0.00 & 0.00 & 0.00 \\
+2 & 25 & 92.00 & 76.00 & 84.00 & 40.00 & 0.00 & 0.00 & 0.00 \\
+3 & 28 & 100.00 & 100.00 & 100.00 & 28.57 & 0.00 & 0.00 & 0.00 \\
+4 & 77 & 98.70 & 98.70 & 97.40 & 68.83 & 0.00 & 0.00 & 0.00 \\
+5 & 54 & 100.00 & 98.15 & 96.30 & 72.22 & 0.00 & 0.00 & 0.00 \\
+6 & 159 & 100.00 & 99.37 & 98.11 & 79.87 & 8.18 & 0.00 & 0.00 \\
+7 & 377 & 99.73 & 99.73 & 98.41 & 83.82 & 87.27 & 77.19 & 85.15 \\
+8 & 95 & 98.95 & 100.00 & 96.84 & 32.63 & 0.00 & 0.00 & 0.00 \\
+9 & 91 & 98.90 & 97.80 & 97.80 & 72.53 & 0.00 & 0.00 & 0.00 \\
+10 & 121 & 100.00 & 100.00 & 95.87 & 48.76 & 0.83 & 0.00 & 0.00 \\
+11 & 120 & 98.33 & 99.17 & 97.50 & 66.67 & 0.83 & 0.00 & 0.00 \\
+12 & 47 & 97.87 & 93.62 & 89.36 & 46.81 & 0.00 & 0.00 & 0.00 \\
+13 & 89 & 97.75 & 96.63 & 97.75 & 79.78 & 34.83 & 0.00 & 0.00 \\
+14 & 28 & 92.86 & 92.86 & 89.29 & 39.29 & 0.00 & 0.00 & 0.00 \\
+15 & 70 & 100.00 & 100.00 & 95.71 & 65.71 & 0.00 & 0.00 & 0.00 \\
+16 & 294 & 100.00 & 100.00 & 100.00 & 92.86 & 86.73 & 87.76 & 69.05 \\
+\midrule
+Overall & 1,854 & 99.19 & 98.65 & 97.52 & 71.63 & 36.62 & 29.61 & 28.26 \\
+Class mean & -- & 98.27 & 96.65 & 96.02 & 59.04 & 14.75 & 9.70 & 9.07 \\
+\bottomrule
+\end{tabular}
 \end{table}
+
+\begin{table}[!t]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\caption{Seaquest: every class at every noise strength. Entries are class-conditional accuracies (percent) over the full dataset, including probe-training frames. The count $N_c$ is unchanged across columns. Each column uses a separately trained MLP.}
+\label{tab:per_class_noise}
+\begin{tabular}{crrrrrrrr}
+\toprule
+Diver count & $N_c$ & $\alpha=0$ & $0.1$ & $0.2$ & $0.4$ & $0.6$ & $0.8$ & $1.0$ \\
+\midrule
+0 & 39,767 & 99.82 & 99.70 & 97.24 & 91.26 & 91.21 & 93.43 & 97.72 \\
+1 & 17,003 & 99.35 & 99.02 & 92.32 & 64.09 & 39.10 & 22.43 & 7.58 \\
+2 & 1,374 & 95.78 & 94.76 & 35.23 & 0.00 & 0.00 & 0.00 & 0.00 \\
+3 & 260 & 95.38 & 93.46 & 41.15 & 0.00 & 0.00 & 0.00 & 0.00 \\
+4 & 146 & 95.89 & 91.78 & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 \\
+5 & 417 & 96.88 & 96.40 & 69.06 & 0.00 & 0.00 & 0.00 & 0.00 \\
+6 & 110 & 90.91 & 90.00 & 0.00 & 0.00 & 0.00 & 0.00 & 0.00 \\
+\midrule
+Overall & 59,077 & 99.52 & 99.30 & 93.52 & 79.87 & 72.65 & 69.35 & 67.96 \\
+Class mean & -- & 96.29 & 95.02 & 47.86 & 22.19 & 18.62 & 16.55 & 15.04 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Frostbite: stage-wise changes.}
+At $\alpha=0$, all class accuracies are at least 92.00\%. Mean class accuracy remains 96.02\% at $\alpha=0.2$, but falls to 59.04\% at $\alpha=0.4$ and 14.75\% at $\alpha=0.6$. The deterioration varies by stage: at $\alpha=0.4$, stage 1 has 11.54\% accuracy while stage 16 retains 92.86\%. At $\alpha=0.6$, only stages 0, 6, 7, 10, 11, 13, and 16 have any correct predictions. At both $\alpha=0.8$ and $\alpha=1$, only stages 7 and 16 have correct predictions. Under complete background replacement, their class accuracies are 85.15\% and 69.05\%, with 0\% for every other stage. The 28.26\% overall accuracy is above the 20.33\% constant-majority baseline (always predicting stage 7), while the 9.07\% class mean is only modestly above the $100/17=5.88\%$ uniform-random baseline. The selected validation accuracy at this strength is 24.05\%.
+
+\paragraph{Seaquest: imbalance and minority-class performance.}
+Class 0 accounts for 39,767 of 59,077 frames (67.31\%), so overall accuracy can remain high even when most classes are poorly decoded. At $\alpha=0.1$, every class retains at least 90.00\% accuracy. At $\alpha=0.2$, overall accuracy is still 93.52\%, but the class mean is 47.86\%; counts 4 and 6 have no correct predictions, while counts 2, 3, and 5 have accuracies of 35.23\%, 41.15\%, and 69.06\%. For every $\alpha\geq0.4$, counts 2--6 have 0\% accuracy. At $\alpha=1$, count-0 and count-1 accuracies are 97.72\% and 7.58\%, respectively, yielding 67.96\% overall accuracy and 15.04\% mean class accuracy. The overall result is close to the 67.31\% constant-majority baseline; it should not be called uniform-random chance, whose expected accuracy is $100/7=14.29\%$. The selected validation accuracy is 68.00\%. The class-wise results also show that the fitted probe is not simply always predicting class 0.
+
+\paragraph{Relation to earlier endpoint results.}
+The strength-sweep tables and Figure~\ref{fig:noise_probe_accuracy} use only the files in \path{STORM/probing_results/frostbite_noise_sweep/} and \path{STORM/probing_results/seaquest_noise_sweep/}. Earlier two-condition runs reported 27.72\% noisy accuracy in Frostbite and 68.06\% in Seaquest; the latter used 200 training epochs rather than the 50 epochs used at every strength here. The earlier implementation also consumed the global NumPy random state during noise generation, whereas the sweep uses a separate noise generator so clean and noisy conditions retain the same frame split. Those earlier endpoint results are therefore not substituted for the sweep's $\alpha=1$ measurements of 28.26\% and 67.96\%. The separate FLASH endpoint results in Appendix~\ref{sec:appendix_noise_robustness_flash} retain their own run settings.
+
+\paragraph{Interpretation and scope.}
+The decline persists when each MLP is trained on the same corruption strength on which it is evaluated. This rules out an evaluation-only change in noise strength for the probe as the protocol behind these results. It does not rule out a distribution shift for the frozen encoder, which was trained on RL observations, nor separate representation changes from finite probe capacity, optimization, class imbalance, or limited data. Because full-dataset accuracies include training frames and the validation set is used for checkpoint selection, the reported numbers do not estimate performance on an independent test set. The frame split and single-seed design further limit claims about generalization to new trajectories or training runs. These results establish degraded decoding by the specified supervised procedure as background corruption increases, not that target information has necessarily been erased or that spatial entanglement alone causes the degradation.
 
 Taken together, the cosine similarity patterns suggest sensitivity to target-region changes, and the high clean probing accuracy shows that supervised probes can accurately predict the evaluated task variables from latent states. These results support the claim that lightweight encoders can retain task-relevant information despite poor reconstruction, while leaving open whether other information is lost and how robustly the retained information generalizes across observation distributions.
 
