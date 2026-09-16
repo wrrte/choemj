@@ -300,12 +300,12 @@ Overall, the results show that the benefit of FLASH varies across environments.
 
 \begin{table}[!t]
 \centering
-\caption{Atari 100k performance. The ``+ours'' columns denote agents augmented with FLASH. Dashes indicate results not yet available. \todo{색상 바꾸고 차이 열 하나씩 추가}}
+\caption{Atari 100k performance. The ``+ours'' columns denote agents augmented with FLASH, and $\Delta$ denotes the difference between FLASH and its corresponding baseline.}
 \label{tab:main_performance}
 \resizebox{\textwidth}{!}{
 \begin{tabular}{lrrrrrrrr}
 \toprule
-Game & Random & Human & STORM & STORM+ours & DRAMA & DRAMA+ours & EDELINE & EDELINE+ours \\
+Game & Random & Human & STORM & STORM+ours & $\Delta$ & DRAMA & DRAMA+ours & $\Delta$ \\
 \midrule
 Alien         & 227.8 & 7127.7 & 1041.8 & \textcolor{blue}{1091.1} & 1051.5 & \textcolor{red}{972.2} & - & -  \\
 Amidar        & 5.8 & 1719.5 & 175.9 & \textcolor{red}{150.5} & 108.0 & \textcolor{blue}{115.2} & - & -  \\
@@ -1035,7 +1035,7 @@ Model-Free Episodic Control (MFEC; \citealp{blundell2016model}) stores high obse
 
 The distinction relevant to FLASH is not merely whether past experience is retrieved, but where the retrieved information enters the learning pipeline. MFEC and NEC use episodic memories directly in value estimation, and EVA explicitly uses retrieved trajectories to augment value estimates. FLASH instead retrieves replay contexts around selected anchors and uses those contexts as initial conditions for imagined trajectories. The resulting imagined trajectories are optimized using the base agent's existing Actor-Critic objectives; retrieved returns or value estimates are not directly substituted into the critic target. Retrieval therefore affects learning through the composition of the Actor-Critic imagination batch.
 
-FLASH also differs in its retrieval mechanism. Rather than performing a full nearest-neighbor search over the replay memory or constructing an explicit associative graph, it maps latent representations to discrete hash buckets and restricts candidate retrieval to matching buckets. Because the world-model representation evolves during training, stored bucket assignments can become stale. FLASH lazily re-encodes retrieved candidates for verification and triggers a Global Rebuild when the resulting hit rate falls below a threshold, thereby adapting the retrieval index to representation drift as described in Section~\ref{sec:flash_memory}.
+FLASH also differs in its retrieval mechanism. Rather than performing a full nearest-neighbor search over the replay memory or constructing an explicit associative graph, it maps latent representations to discrete hash buckets and restricts candidate retrieval to matching buckets. Because the world-model representation evolves during training, stored bucket assignments can become stale. FLASH lazily re-encodes retrieved candidates for verification and triggers a Global Rebuild when the resulting hit rate falls below a threshold, thereby adapting the retrieval index to representation drift as described in Section~\ref{subsec:flash_memory}.
 
 \subsection{Priority Signals and Anchor Selection}
 
