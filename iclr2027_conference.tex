@@ -12,6 +12,11 @@
 \usepackage{url}
 \usepackage{color}
 
+% 색상반전
+\usepackage{xcolor}
+\pagecolor{black}
+\color{white}
+
 % 빈칸(TODO)을 쉽게 찾을 수 있도록 강조하는 매크로
 \newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
 
@@ -44,6 +49,8 @@ Recent advances in visual Reinforcement Learning (RL) have increasingly adopted 
 
 Recent high-fidelity generative world models demonstrate that preserving visual detail can improve control, but this comes with increased computation \citep{lee2026edeline, alonso2024diffusion}. A central motivation of these approaches is to improve the fidelity of learned representations. However, representation quality may not be the only bottleneck: if compact latent states already retain task-relevant information, control performance may also depend on how effectively downstream policy and value learning use that information and the experiences in which it appears. We therefore investigate a complementary question: Can downstream Actor-Critic optimization make better use of task-relevant information retained in compact visual representations, without requiring heavier generative models?
 
+\todo{아래 두 문단은 좀 축약하고, 첫 문단에 해당하는 내용을 대폭 늘려야함. 특히 아래 두 문단은 섹션3으로 빼되, run-to-run이 핵심 고리일듯. 3.2->3.3(지금기준)을 잇는. 그러니깐 정보는 명확히 있고, blur되어 있는 상황에서, run-to-run 대안을 제시하는 것.}
+
 To examine whether limited representation capacity necessarily explains poor control, we first investigate what information is retained by lightweight encoders. Controlled latent-similarity analyses show that the representations are sensitive to changes in small task-relevant elements, motivating a more direct probing analysis. Our supervised probes predict selected task variables from latent states with high accuracy under clean observations, despite poor visual reconstruction. These results indicate that at least some task-relevant information remains accessible in compact latent representations, suggesting that poor reconstruction alone is insufficient to explain limited control performance.
 
 We further observed substantial run-to-run variation in preliminary DRAMA \citep{wang2025drama} experiments on Seaquest, one of the environments in the Atari 100k benchmark. Across independent runs using different random seeds under the same implementation and hyperparameter configuration, stochastic training trajectories led to substantially different scores of approximately 600 and 1,500. In Seaquest, shooting enemies provides immediate rewards, whereas rescuing divers is rewarded only after six divers are collected and returned to the surface \citep{pmlr-v48-zahavy16}. In the inspected behavior, the higher-scoring run sustained hunting until oxygen depletion, whereas the lower-scoring run died in collisions during hunting; neither exhibited surfacing with collected divers. Together with the probing evidence above, this run-to-run variation motivates us to ask whether informative experiences encountered during training can be translated into policy and value improvement more reliably through downstream Actor-Critic optimization. We describe this preliminary observation and its interpretation limits in Appendix~\ref{sec:appendix_ac_bottleneck}.
@@ -71,14 +78,11 @@ Prioritized Experience Replay uses TD-error to prioritize transitions \citep{sch
 
 Appendix~\ref{sec:appendix_related_work} provides further background and comparisons.
 
+
 \section{Problem Analysis and Motivation}
 \label{sec:representation}
 
-\subsection{Reconstruction and Information Loss}
-Poor visual reconstruction raises questions about the information available in a model state, but image blurriness alone does not establish information loss. In this section, we investigate whether selected task-relevant variables remain despite poor reconstruction.
-
-As a motivating observation, we note the temporal persistence of objects during the open-loop imagination phase in models like DreamerV3 \citep{hafner2023mastering} and Drama \citep{wang2025drama}. During this phase, the model predicts future states solely based on its internal transition dynamics, without access to real observations. For instance, in Figure~\ref{fig:temporal_persistence}, the highlighted fish appears less blurry at $t$, more blurry at $t+1$, and less blurry again at $t+2$. This observation suggests that decoded image quality alone is insufficient to assess predictive state information. It does not establish complete information preservation but motivates the direct probing experiments below.
-Here, we use blurry only to describe the visual appearance of decoded images, not the information content of latent states.
+Poor visual reconstruction naturally raises the concern that a compact latent state may have discarded information needed for control. However, reconstruction quality alone does not determine which task-relevant distinctions remain encoded in the latent state. As a motivating observation, consider the open-loop imagined trajectory in Figure~\ref{fig:temporal_persistence}. During open-loop imagination, the model predicts future states using only its internal transition dynamics, without access to real observations. The highlighted fish appears less blurry at $t$, more blurry at $t+1$, and less blurry again at $t+2$. This non-monotonic change in decoded appearance raises the possibility that visual fidelity and the information retained by the predictive state need not vary together in a simple way. The observation does not establish information preservation; instead, it motivates examining the latent representation directly. Throughout this section, we use \emph{blurry} only to describe the visual appearance of decoded images, not the information content of latent states.
 
 \begin{figure}[!t]
 \centering
@@ -101,20 +105,15 @@ Here, we use blurry only to describe the visual appearance of decoded images, no
 \label{fig:temporal_persistence}
 \end{figure}
 
-\subsection{Probing the Latent Space}
-\label{subsec:probing_latent}
+\subsection{Latent Sensitivity to Task-Relevant Visual Changes}
+\label{subsec:latent_sensitivity}
 
-\todo{더 줄이기. 핵심만 넣기}
+We first ask a deliberately weaker question than whether a latent state explicitly represents a semantic variable: does the representation respond systematically when only a small task-relevant visual factor changes? We construct controlled Seaquest observations with identical backgrounds while varying only either the number of collected divers or the position of a diver, and compare the resulting latent states using pairwise cosine similarity. As shown in Figure~\ref{fig:probing_summary}(a--b), the representations are not invariant to these controlled changes. Adjacent diver counts have an average cosine similarity of $0.949$, compared with $0.893$ for pairs differing by three or more counts, while similarities across diver positions fall as low as $0.63$. These structured differences indicate that the encoder is sensitive to the manipulated task-relevant regions rather than completely discarding their variation.
 
-
-To formally investigate whether standard lightweight encoders successfully capture functionally critical elements, we conducted extensive probing experiments on the Seaquest environment. First, using images with perfectly identical backgrounds varying only the target elements, we observed that the pairwise cosine similarities of latent states encoding different diver counts and positions were strictly less than 1.0 (dropping to $0.86$ and $0.63$, respectively). This suggests sensitivity to changes in these target regions, motivating a direct test of whether a supervised probe can predict the corresponding task variables from latent states.
-
-To assess prediction accuracy, we detached the pre-trained encoder and trained a lightweight multilayer perceptron (MLP) to predict ground-truth Random Access Memory (RAM) states (e.g., diver counts and exact $(x, y)$ coordinates) directly from the latent state $z$. The frozen encoder had not encountered states with 4--6 collected divers during its RL training, although these counts were included in the supervised probe training set. Figure~\ref{fig:probing_summary}(c) summarizes the clean probing results. The reported count accuracies are computed on the full probing dataset, including probe-training frames, and the 4--6 result pools those three classes. The mean localization error of 12.44 pixels is measured in the original Atari screen coordinates and corresponds to less than 5 pixels in the encoder's $64\times64$ input space; part of this residual error may arise from the spatial and temporal mismatch between Atari RAM states and rendered sprites (Appendix~\ref{sec:appendix_ram_misalignment}).
-
+Sensitivity alone, however, is insufficient to establish that the corresponding task variable can be recovered from the representation. A latent state may respond to a visual perturbation without organizing that response in a form that supports semantic prediction. We therefore next test whether a supervised decoder can recover the underlying task variables from the frozen latent representation.
 
 \begin{figure}[t]
 \centering
-
 \begin{minipage}[t]{0.31\textwidth}
   \vspace{0pt}
   \centering
@@ -148,17 +147,28 @@ To assess prediction accuracy, we detached the pre-trained encoder and trained a
     Position & Mean error & 12.44 px \\
     \hline
   \end{tabular}
-
   \vspace{7mm}
   \small (c) Clean probing results
 \end{minipage}
-
-\caption{
-(a--b) Pairwise cosine similarities of latent states when only the diver count or diver position is varied while the background is fixed.
-(c) Performance of supervised probes trained on frozen latent representations.
-}
+\caption{(a--b) Pairwise cosine similarities of latent states when only the diver count or diver position is varied while the background is fixed. (c) Performance of supervised probes trained on frozen latent representations.}
 \label{fig:probing_summary}
 \end{figure}
+
+\subsection{Decodability of Task-Relevant Information}
+\label{subsec:probing_latent}
+
+To test whether these latent differences carry recoverable task information, we freeze the pre-trained encoder and train lightweight multilayer perceptron (MLP) probes to predict ground-truth Random Access Memory (RAM) variables directly from the latent state $z$, including diver count, diver presence, and diver position. The Seaquest count experiment is particularly relevant to the representational ceiling faced by downstream learning. In Seaquest, rescuing divers requires collecting six divers and returning them to the surface before receiving the corresponding reward \citep{zahavy2016graying}. However, the encoder used in our probing experiment had never encountered states with four to six collected divers during its RL training. Thus, the encoder had not been optimized on precisely the high-diver-count states that become important for completing this behavior.
+
+The supervised probe is trained on labeled examples spanning all counts from 0 to 6, including examples with four to six divers. The experiment is therefore not a test of zero-shot generalization by the probe. Rather, it asks whether an encoder whose RL training never included these high-count states nevertheless maps them to latent representations that retain enough information for their counts to be recovered once labeled examples are provided. Figure~\ref{fig:probing_summary}(c) shows that the count probe reaches $99.5\%$ accuracy over counts 0--6 and $95.7\%$ over the pooled 4--6 subset. The diver-presence probe reaches $92.4\%$ accuracy, while position prediction has a mean error of 12.44 pixels in the original Atari screen coordinates, corresponding to less than 5 pixels in the encoder's $64\times64$ input space. Part of the remaining localization error may arise from spatial and temporal mismatch between Atari RAM states and rendered sprites (Appendix~\ref{sec:appendix_ram_misalignment}). The reported count accuracies are computed on the full probing dataset, including probe-training frames, and therefore should not be interpreted as independent test-set estimates; complete validation results and protocols are reported in Appendix~\ref{subsec:appendix_noise_sweep}.
+
+These results do not imply that an Actor-Critic learner can exploit the same information as effectively as a supervised probe: the probe receives direct labels for the target variables, whereas policy and value learning receive different and substantially weaker learning signals. They do, however, argue against the simple explanation that failure to encounter the high-diver-count states during RL training necessarily left the encoder without information capable of distinguishing them. For the evaluated variables, the representation therefore does not impose an obviously low ceiling caused by complete information absence, leaving room for downstream learning to make better use of the available signal.
+
+\subsection{Context Dependence of Latent Decodability}
+\label{subsec:context_dependence}
+
+High clean-data decodability does not imply that the relevant information is represented in a form that is easily separable from the surrounding visual context. We therefore examine whether the target variable remains recoverable when its own pixels are preserved but the rest of the observation is progressively corrupted. As illustrated in Figure~\ref{fig:background_noise_examples}(a), we preserve only the igloo bounding box in Frostbite or the bottom-diver bounding box in Seaquest and blend all pixels outside that region with uniform random noise. The quantitative sweep uses recorded observations without replacing the target igloo stages or diver counts.
+
+For each noise strength $\alpha\in\{0,0.1,0.2,0.4,0.6,0.8,1\}$, we keep the encoder frozen and train a new MLP from scratch using observations corrupted at that same strength; validation and final evaluation also use the same corruption strength. This retraining is important: the experiment does not apply noisy inputs to a probe trained only on clean observations. Instead, at each corruption level, the probe is given the opportunity to learn whatever combination of latent coordinates remains predictive under that condition. Thus, even if target information is distributed across or entangled with multiple latent dimensions, a separately trained probe can in principle adapt to those dimensions whenever the target signal remains stably recoverable from the resulting representation.
 
 \begin{figure}[t]
 \centering
@@ -176,33 +186,28 @@ To assess prediction accuracy, we detached the pre-trained encoder and trained a
   \par\vspace{1mm}
   {\small (b) Mean class accuracy}
 \end{minipage}
-
 \caption{Background corruption and supervised decoding. (a) Representative Frostbite and Seaquest observations across noise strengths $\alpha$. (b) Mean class accuracy of separately trained probes at each strength.}
 \label{fig:background_noise_examples}
 \label{fig:noise_probe_accuracy}
 \end{figure}
 
-We further measured how supervised decoding changes when the target bounding box is preserved and all pixels outside it are blended with uniform random noise (Figure~\ref{fig:background_noise_examples}(a)). For the visualization, only the igloo bounding box in Frostbite or the bottom-diver bounding box in Seaquest is preserved, and the same random pixel field is reused across noise strengths within each row. The quantitative sweep uses recorded observations without replacing igloo stages or diver counts. For each noise strength $\alpha\in\{0,0.1,0.2,0.4,0.6,0.8,1\}$, we kept the encoder frozen and trained a new MLP using observations corrupted at that strength; validation and final evaluation used the same corruption strength. Thus, the comparison measures decoding after training a separate probe for each corruption condition, rather than applying noise only at evaluation to a probe trained on clean inputs. At $\alpha=1$, overall accuracy changes from 99.52\% to 67.96\% in Seaquest and from 99.19\% to 28.26\% in Frostbite. The unweighted mean of class accuracies decreases from 96.29\% to 15.04\% and from 98.27\% to 9.07\%, respectively (Figure~\ref{fig:noise_probe_accuracy}(b)). These overall and class-average metrics are computed on the full probing dataset, including probe-training frames. The corresponding validation accuracies, used for checkpoint selection, decrease from 97.67\% to 68.00\% in Seaquest and from 96.76\% to 24.05\% in Frostbite. Appendix~\ref{subsec:appendix_noise_sweep} reports the overall-accuracy curve, the complete protocol, and class-wise results at every strength.
+Despite this condition-specific retraining, decodability degrades sharply as the surrounding context is corrupted. At $\alpha=1$, the unweighted mean of class accuracies falls from $96.29\%$ to $15.04\%$ in Seaquest and from $98.27\%$ to $9.07\%$ in Frostbite (Figure~\ref{fig:noise_probe_accuracy}(b)). Overall accuracy changes from $99.52\%$ to $67.96\%$ in Seaquest and from $99.19\%$ to $28.26\%$ in Frostbite; the comparatively high Seaquest overall accuracy reflects its strong class imbalance. The corresponding validation accuracies, used for checkpoint selection, decrease from $97.67\%$ to $68.00\%$ and from $96.76\%$ to $24.05\%$, respectively. Appendix~\ref{subsec:appendix_noise_sweep} reports the overall-accuracy curve, complete protocol, and class-wise results at every strength.
 
-Accuracy decreases despite matching the noise strength between probe training and evaluation. However, corruption still changes the inputs seen by the frozen encoder relative to its RL training distribution. The experiment therefore measures the sensitivity of this encoder--probe procedure; it does not isolate spatial entanglement from encoder distribution shift, finite probe capacity, or optimization and data limitations.
+Strong corruption is intentionally severe, and some degradation is expected. The relevant observation is therefore not merely that noise hurts prediction, but that a probe retrained for each corruption condition becomes much less able to recover an unchanged target variable from the resulting latent state. This suggests that the high clean-data decodability observed above does not arise from a target representation that remains independently and robustly accessible under large changes to the surrounding visual context. Because the corruption also moves the frozen encoder away from its RL training distribution, this experiment does not isolate spatial entanglement from general sensitivity to distribution shift, finite probe capacity, optimization, or data limitations. We therefore do not interpret the result as proof of a particular representational mechanism.
 
-Adjacent diver counts have an average cosine similarity of 0.949, compared with 0.893 for pairs differing by three or more counts, while the maximum off-diagonal similarity across diver positions is 0.769. Together with clean probe classification accuracies of 92.4\% or higher (Figure~\ref{fig:probing_summary}), these results provide direct evidence that the latent states remain sensitive to and predictive of the evaluated task variables. These findings do not establish that all semantic information is preserved or that spatial entanglement is the sole bottleneck. Nevertheless, they suggest that poor reconstruction alone is insufficient to diagnose missing task-relevant information, motivating interventions that help downstream learners use the information available in these representations.
+For downstream control, however, this context dependence is consequential even without isolating its exact cause. If a task-relevant factor is encoded together with contextual variation, policy and value learning from finite trajectories may be more susceptible to relying on incidental contextual features that co-occur with successful experiences rather than consistently exploiting the task-relevant factor itself. Taken together, the clean and corrupted probing results therefore identify a specific regime of interest: substantial task-relevant information is present in the representation, including for important states absent from the encoder's RL training experience, yet access to that information need not be simple or context-invariant. This motivates asking whether improving the representation itself is the only useful intervention, or whether downstream learning can make better use of the imperfect signal already available.
 
-
-
-\subsection{The Actor-Critic Optimization as an Intervention Point}
+\subsection{Experience Utilization as a Downstream Intervention Point}
 \label{subsec:ac_intervention}
-Having found that supervised probes can predict selected task-relevant variables from latent states, we next ask whether control performance can be improved while keeping the encoder, world model, and Actor-Critic architectures unchanged. The substantial run-to-run variation observed under the same model architecture and training configuration further suggests that performance is not determined by representation architecture alone; stochastic training trajectories, the experiences collected along them, and how those experiences influence downstream learning can also matter.
 
-We therefore investigate whether selectively controlling experience reuse can improve downstream learning while leaving the base agent's core architectures unchanged. Specifically, FLASH identifies salient learning events, retrieves structurally similar historical experiences, and groups them within the same Actor-Critic training batch. This intervention changes which previously encountered experiences are emphasized during optimization, rather than modifying the base agent's network architectures.
+Supervised decodability alone does not establish effective use of the same information for control. A supervised probe receives explicit target labels, whereas an Actor-Critic learner must infer useful distinctions indirectly through rewards, bootstrapped values, and the distribution of experiences encountered during training. The preceding results make this downstream question non-vacuous: the evaluated latent states contain substantial task-relevant information, so downstream learning is not obviously constrained by complete information absence, while the corruption experiment suggests that extracting and using that information may nevertheless be nontrivial.
 
+A preliminary observation from DRAMA \citep{wang2025drama} further motivates examining this intervention point. On Seaquest, independent runs using different random seeds under the same implementation and hyperparameter configuration produced substantially different average evaluation scores of approximately 600 and 1,500. In Seaquest, shooting enemies provides immediate rewards, whereas rescuing divers is rewarded only after six divers are collected and returned to the surface \citep{zahavy2016graying}. In the inspected behavior, the higher-scoring run sustained hunting until oxygen depletion, whereas the lower-scoring run died in collisions during hunting; neither exhibited surfacing with collected divers. These selected observations do not identify the cause of the performance difference, and exploration, collected data, learned representations, world-model parameters, and Actor-Critic optimization can all diverge across seeds. We therefore use the run-to-run difference only as evidence that a fixed architecture and training configuration do not uniquely determine the realized control behavior; further details and limitations are provided in Appendix~\ref{sec:appendix_ac_bottleneck}.
 
-\begin{figure}[t]
-\centering
-\includegraphics[width=\textwidth]{pipeline.pdf}
-\caption{Overview of the FLASH pipeline. (Left) During environment interaction, observations are encoded and projected into discrete hash keys registered in a hash bucket. (Right) Triggered anchors retrieve structurally similar replay contexts with matching hashes. Each retrieved target retains its recorded action; after this fixed action is applied, policy-driven imagination starts from the resulting model-predicted next state. The resulting groups replace part of the random imagination batch. \todo{remove white space. group anchor and 2 targets}}
-\label{fig:flash_pipeline}
-\end{figure}
+Together with the probing results, this observation suggests a complementary direction to improving representation fidelity. When task-relevant factors are represented imperfectly, better control need not necessarily require that the learner first recover a unique, perfectly disentangled semantic state. A downstream learner may instead benefit from more consistent learning signals across previously encountered experiences with similar latent structure and compatible useful behavior. We treat this as a motivating hypothesis rather than a conclusion established by the probing or run-to-run analyses.
+
+We therefore investigate experience utilization as an intervention point while leaving the encoder, world model, and Actor-Critic architectures unchanged. FLASH identifies salient learning events, retrieves structurally similar historical experiences, and groups them within the same Actor-Critic training batch. Rather than attempting to replace the underlying representation, this intervention changes which previously encountered experiences are emphasized during downstream optimization. Section~\ref{sec:method} describes how FLASH implements this targeted reuse efficiently.
+
 
 \section{METHODOLOGY}
 \label{sec:method}
@@ -213,6 +218,12 @@ We therefore investigate whether selectively controlling experience reuse can im
 Building on the findings in Section~\ref{sec:representation}, we aim to improve downstream Actor-Critic learning by selectively reusing informative experiences together with past contexts that have similar latent structure. However, repeatedly searching the entire replay buffer for similar contexts would introduce substantial computational overhead, undermining the lightweight nature of this intervention. FLASH therefore maintains a hash-indexed episodic memory to efficiently identify candidate contexts with similar latent structure, selects salient anchors using a surprise score, and incorporates the retrieved groups into Actor-Critic training batches. We describe the method in three parts: surprise-guided anchor selection (Section~\ref{subsec:flash_retrieval}), hash-indexed retrieval and memory maintenance (Section~\ref{subsec:flash_memory}), and integration into Actor-Critic learning (Section~\ref{subsec:flash_learning}). The complete FLASH procedure is summarized in Appendix~\ref{app:flash_algorithm}.
 
 
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{pipeline.pdf}
+\caption{Overview of the FLASH pipeline. (Left) During environment interaction, observations are encoded and projected into discrete hash keys registered in a hash bucket. (Right) Triggered anchors retrieve structurally similar replay contexts with matching hashes. Each retrieved target retains its recorded action; after this fixed action is applied, policy-driven imagination starts from the resulting model-predicted next state. The resulting groups replace part of the random imagination batch.}
+\label{fig:flash_pipeline}
+\end{figure}
 
 
 \subsection{Surprise-Guided Anchor Selection}
@@ -301,7 +312,8 @@ Overall, the results show that the benefit of FLASH varies across environments.
 
 \begin{table}[!t]
 \centering
-\caption{Atari 100k performance. The ``+ours'' columns denote agents augmented with FLASH, and $\Delta$ denotes the difference between FLASH and its corresponding baseline.}
+\caption{Atari 100k performance. The ``+ours'' columns denote agents augmented with FLASH, and $\Delta$ denotes the difference between FLASH and its corresponding baseline.
+}
 \label{tab:main_performance}
 \resizebox{\textwidth}{!}{
 \begin{tabular}{lllrrrrrr}
@@ -310,36 +322,36 @@ Game & Random & Human & STORM & STORM+ours & $\Delta$ & DRAMA & DRAMA+ours & $\D
 \midrule
 Alien         & 227.8 & 7127.7 & 1041.8 & 1091.1 & \textcolor{green}{+49.3} & 1051.5 & 972.2 & \textcolor{red}{-79.3} \\
 Amidar        & 5.8 & 1719.5 & 175.9 & 150.5 & \textcolor{red}{-25.4} & 140.3 & 130.2 & \textcolor{red}{-10.1} \\
-Assault       & 222.4 & 742.0 & 643.7 & 693.0 & \textcolor{green}{+49.3} & 383.5 & 449.9 & \textcolor{green}{+66.4} \\
-Asterix       & 210.0 & 8503.3 & 546.2 & 572.5 & \textcolor{green}{+26.3} & 1680 & 1397.5 & \textcolor{red}{-282.5} \\
-BankHeist     & 14.2 & 753.1 & 163 & 169.5 & \textcolor{green}{+6.5} & 372.5 & 296 & \textcolor{red}{-76.5} \\
+Assault       & 222.4 & 742.0 & 764.4 & 701.0 & \textcolor{red}{-63.4} & 383.5 & 449.9 & \textcolor{green}{+66.4} \\
+Asterix       & 210.0 & 8503.3 & 677.5 & 759.4 & \textcolor{green}{+81.9} & 1680 & 1397.5 & \textcolor{red}{-282.5} \\
+BankHeist     & 14.2 & 753.1 & 431 & 401.5 & \textcolor{red}{-29.5} & 372.5 & 296 & \textcolor{red}{-76.5} \\
 BattleZone    & 2360.0 & 37187.5 & 10575 & 10608.3 & \textcolor{green}{+33.3} & 8966.7 & 8233.3 & \textcolor{red}{-733.4} \\
-Boxing        & 0.1 & 12.1 & 74.8 & 77.3 & \textcolor{green}{+2.5} & 58.5 & 65.7 & \textcolor{green}{+7.2} \\
+Boxing        & 0.1 & 12.1 & 73.3 & 68.6 & \textcolor{red}{-4.7} & 58.5 & 65.7 & \textcolor{green}{+7.2} \\
 Breakout      & 1.7 & 30.5 & 11.7 & 12.4 & \textcolor{green}{+0.7} & 16.4 & 18.9 & \textcolor{green}{+2.5} \\
 ChopperCommand & 811.0 & 7387.8 & 1598.3 & 1225 & \textcolor{red}{-373.3} & 1350 & 1390 & \textcolor{green}{+40} \\
 CrazyClimber  & 10780.5 & 35829.4 & 57571.7 & 57908.3 & \textcolor{green}{+336.6} & 74810 & 74070 & \textcolor{red}{-740} \\
 DemonAttack   & 152.1 & 1971.0 & 193 & 171.5 & \textcolor{red}{-21.5} & 187.2 & 151 & \textcolor{red}{-36.2} \\
 Freeway       & 0.0 & 29.6 & - & - & - & - & - & - \\
-Frostbite     & 65.2 & 4334.7 & 1807.5 & 2012.1 & \textcolor{green}{+204.6} & 1101.2 & 1105.4 & \textcolor{green}{+4.2} \\
-Gopher        & 257.6 & 2412.5 & 3747 & 3578 & \textcolor{red}{-169} & 1760 & 1851 & \textcolor{green}{+91} \\
+Frostbite     & 65.2 & 4334.7 & 1742.4 & 1986.8 & \textcolor{green}{+244.4} & 1101.2 & 1105.4 & \textcolor{green}{+4.2} \\
+Gopher        & 257.6 & 2412.5 & 3362.7 & 2720.3 & \textcolor{red}{-642.4} & 1760 & 1851 & \textcolor{green}{+91} \\
 Hero          & 1027.0 & 30826.4 & 13178 & 13269.4 & \textcolor{green}{+91.4} & 8921.6 & 6903.9 & \textcolor{red}{-2017.7} \\
 Jamesbond     & 29.0 & 302.8 & - & - & - & 420 & 525 & \textcolor{green}{+105} \\
-Kangaroo      & 52.0 & 3035.0 & 1620 & 1675 & \textcolor{green}{+55} & 1700 & 1800 & \textcolor{green}{+100} \\
-Krull         & 1598.0 & 2665.5 & 5608 & 5915.2 & \textcolor{green}{+307.2} & 9520 & 8965.3 & \textcolor{red}{-554.7} \\
+Kangaroo      & 52.0 & 3035.0 & 1430 & 1445 & \textcolor{green}{+15} & 1700 & 1800 & \textcolor{green}{+100} \\
+Krull         & 1598.0 & 2665.5 & 5778.2 & 6135.5 & \textcolor{green}{+357.3} & 9520 & 8965.3 & \textcolor{red}{-554.7} \\
 KungFuMaster  & 258.5 & 22736.3 & 25137.5 & 25177.5 & \textcolor{green}{+40} & 15413.3 & 15996.7 & \textcolor{green}{+583.4} \\
 MsPacman      & 307.3 & 6951.6 & - & - & - & 2868 & 2961 & \textcolor{green}{+93} \\
 Pong          & -20.7 & 14.6 & 5.6 & 9 & \textcolor{green}{+3.4} & 8.8 & 14.7 & \textcolor{green}{+5.9} \\
 PrivateEye    & 24.9 & 69571.3 & - & - & - & 100 & -59.7 & \textcolor{red}{-159.7} \\
 Qbert         & 163.9 & 13455.0 & 2875.2 & 2920.2 & \textcolor{green}{+45} & 633.8 & 801.2 & \textcolor{green}{+167.4} \\
-RoadRunner    & 11.5 & 7845.0 & - & - & - & 7445 & 8510 & \textcolor{green}{+1065} \\
+RoadRunner    & 11.5 & 7845.0 & 8530 & 9803.3 & \textcolor{green}{+1273.3} & 7445 & 8510 & \textcolor{green}{+1065} \\
 Seaquest      & 68.4 & 42054.7 & - & - & - & 483 & 466 & \textcolor{red}{-17} \\
 UpNDown       & 533.4 & 11693.2 & 5022 & 5225.2 & \textcolor{green}{+203.2} & 4661.5 & 5158.5 & \textcolor{green}{+497} \\
 \midrule
-\#Superhuman ($\uparrow$) & 0 & N/A & 5 & 5 & 0 & 4 & 6 & \textcolor{green}{+2} \\
-Mean ($\uparrow$) & 0.000 & 1.000 & 0.963 & 0.997 & \textcolor{green}{+0.034} & 0.930 & 0.965 & \textcolor{green}{+0.035} \\
-Median ($\uparrow$) & 0.000 & 1.000 & 0.405 & 0.416 & \textcolor{green}{+0.011} & 0.370 & 0.399 & \textcolor{green}{+0.029} \\
-IQM ($\uparrow$) & 0.000 & 1.000 & 0.356 & 0.373 & \textcolor{green}{+0.017} & 0.343 & 0.354 & \textcolor{green}{+0.011} \\
-Optimality Gap ($\downarrow$) & 1.000 & 0.000 & 0.516 & 0.503 & \textcolor{green}{-0.013} & 0.560 & 0.547 & \textcolor{green}{-0.013} \\
+\#Superhuman ($\uparrow$) & 0 & N/A & 7 & 6 & \textcolor{red}{-1} & 4 & 6 & \textcolor{green}{+2} \\
+Mean ($\uparrow$) & 0.000 & 1.000 & 0.988 & 0.978 & \textcolor{red}{-0.010} & 0.930 & 0.965 & \textcolor{green}{+0.035} \\
+Median ($\uparrow$) & 0.000 & 1.000 & 0.408 & 0.450 & \textcolor{green}{+0.042} & 0.370 & 0.399 & \textcolor{green}{+0.029} \\
+IQM ($\uparrow$) & 0.000 & 1.000 & 0.432 & 0.433 & \textcolor{green}{+0.001} & 0.343 & 0.354 & \textcolor{green}{+0.011} \\
+Optimality Gap ($\downarrow$) & 1.000 & 0.000 & 0.468 & 0.467 & \textcolor{green}{-0.001} & 0.560 & 0.547 & \textcolor{green}{-0.013} \\
 \bottomrule
 \end{tabular}
 }
@@ -349,15 +361,6 @@ Optimality Gap ($\downarrow$) & 1.000 & 0.000 & 0.516 & 0.503 & \textcolor{green
 \label{subsec:exploitation_amplifier}
 
 We first illustrate how successful training experiences translate into evaluation performance using one training run per method. For each method, we evaluate the final checkpoint at 100k environment steps with 20 evaluation seeds, running one episode per evaluation seed. Each point in the resulting distribution is therefore an individual evaluation episode return from a fixed checkpoint. We complement this illustration with a separate analysis across training seeds in Frostbite below.
-
-
-
-Figure~\ref{fig:exploitation_amplifier}(a) shows that both selected training runs attain similarly high episode returns, while FLASH achieves higher evaluation scores in the later stages of training. The early divergence during the first half of training (retrieval warmup) is discussed in Appendix~\ref{sec:appendix_rng_divergence}. Panel (b) further shows that the final FLASH checkpoint yields higher median and upper-quartile episode returns across evaluation seeds. These observations are consistent with more effective use of successful training experiences in the illustrated runs. The low-return points in panel (b) are individual evaluation outcomes; they should be distinguished from training runs that never discover successful behavior.
-
-\todo{HNS의 중요성. pong에서의 점수 향상이 absolute value는 작아도 큰 것이다. 같은 설명 해야 함. 그리고 점수 하락이 있는 부분도 prior work들에서 어떻게 설명(변명?)하는지 보고 참고하기.}
-
-To quantify this effect, we compare five matched training-seed pairs of STORM and STORM+FLASH in Frostbite, with 20 evaluation episodes per final checkpoint. These retrospective runs used a total budget of 100k environment steps. We define success by episode return $\geq 800$ and a low-return outcome by return $\leq 300$. In four seed pairs, both methods encountered success before FLASH retrieval activated at 50,000 steps. Across these four pairs, FLASH improves the final mean evaluation return in every seed, increasing the average from 2162.6 to 2402.8 ($+11.1\%$). Evaluation success increases from 90.0\% to 93.75\%, while low-return outcomes decrease from 8/80 to 5/80 episodes (10.0\% to 6.25\%). The low-return reduction varies across seeds, however, and its paired bootstrap 95\% confidence interval spans zero ($-13.75$ to $+5.00$ percentage points). Thus, these runs provide evidence of higher final evaluation returns after success has been encountered, while the evidence for a consistent reduction in low-return failures remains limited. Appendix~\ref{sec:appendix_exploitation} reports the per-seed results, training--evaluation gaps, and learning-event timings (Tables~\ref{tab:exploitation_seeds}--\ref{tab:exploitation_timing}).
-
 
 \begin{figure}[!t]
 \centering
@@ -382,6 +385,9 @@ To quantify this effect, we compare five matched training-seed pairs of STORM an
 \label{fig:exploitation_amplifier}
 \end{figure}
 
+Figure~\ref{fig:exploitation_amplifier}(a) shows that both selected training runs attain similarly high episode returns, while FLASH achieves higher evaluation scores in the later stages of training. The early divergence during the first half of training (retrieval warmup) is discussed in Appendix~\ref{sec:appendix_rng_divergence}. Panel (b) further shows that the final FLASH checkpoint yields higher median and upper-quartile episode returns across evaluation seeds. These observations are consistent with more effective use of successful training experiences in the illustrated runs. The low-return points in panel (b) are individual evaluation outcomes; they should be distinguished from training runs that never discover successful behavior.
+
+To quantify this effect, we compare five matched training-seed pairs of STORM and STORM+FLASH in Frostbite, with 20 evaluation episodes per final checkpoint. These retrospective runs used a total budget of 100k environment steps. We define success by episode return $\geq 800$ and a low-return outcome by return $\leq 300$. In four seed pairs, both methods encountered success before FLASH retrieval activated at 50,000 steps. Across these four pairs, FLASH improves the final mean evaluation return in every seed, increasing the average from 2162.6 to 2402.8 ($+11.1\%$). Evaluation success increases from 90.0\% to 93.75\%, while low-return outcomes decrease from 8/80 to 5/80 episodes (10.0\% to 6.25\%). The low-return reduction varies across seeds, however, and its paired bootstrap 95\% confidence interval spans zero ($-13.75$ to $+5.00$ percentage points). Thus, these runs provide evidence of higher final evaluation returns after success has been encountered, while the evidence for a consistent reduction in low-return failures remains limited. Appendix~\ref{sec:appendix_exploitation} reports the per-seed results, training--evaluation gaps, and learning-event timings (Tables~\ref{tab:exploitation_seeds}--\ref{tab:exploitation_timing}).
 
 \subsection{Computational Analysis}
 FLASH retains the base model's encoder architecture while introducing additional computation for hash indexing, anchor selection, retrieval, and memory maintenance.
@@ -426,7 +432,7 @@ FLASH increases the mean Spearman correlation from $0.0756$ to $0.1622$, with an
 
 \subsection{Ablation Studies}
 \label{subsec:ablation_main}
-To validate the core components of our approach, we conducted ablation studies targeting the retrieval mechanism and the triggering condition. First, removing the Retrieval process (using only the trigger) results in a performance drop, supporting the utility of retrieving related contexts beyond prioritizing the selected anchor alone. Second, using Absolute Value instead of temporal Value Difference causes excessive redundant triggering in high-reward plateaus, confirming the necessity of targeting sharp value inflection points. Finally, utilizing an Additive combination instead of our Multiplicative trigger leads to frequent false positives caused by noisy TD-errors, validating our logical AND-like formulation. Comprehensive details and quantitative results for these ablations are provided in Appendix \ref{sec:appendix_ablation_studies}.
+To validate the core components of our approach, we conducted ablation studies targeting the retrieval mechanism and the triggering condition. First, we compare Full FLASH with an anchor-only variant that disables neighbor retrieval while preserving the triggering condition (Table~\ref{tab:neighbor_retrieval_ablation}). Second, using Absolute Value instead of temporal Value Difference causes excessive redundant triggering in high-reward plateaus, confirming the necessity of targeting sharp value inflection points. Finally, utilizing an Additive combination instead of our Multiplicative trigger leads to frequent false positives caused by noisy TD-errors, validating our logical AND-like formulation. Comprehensive details and quantitative results for these ablations are provided in Appendix \ref{sec:appendix_ablation_studies}.
 
 \section{Conclusion}
 \label{sec:conclusion}
@@ -1010,9 +1016,54 @@ We use this observation as motivation for FLASH, rather than as evidence of its 
 To isolate and validate the impact of the core components introduced in FLASH, we conducted rigorous ablation studies. The summarized results discussed in Section \ref{subsec:ablation_main} are elaborated below.
 
 \subsection{Ablation 1: The Role of Neighbor Retrieval}
-In this setting, we preserve the exact triggering condition of FLASH ($\text{ReLU(TD-error)} \times \text{Softplus(Value Difference)}$) but disable neighbor retrieval from the hash buckets. When an anchor is triggered, only its associated replay context is included in the imagination batch, without retrieving structurally similar historical contexts. The observed performance drop supports the utility of augmenting the anchor context with related historical contexts. In the evaluated setting, this anchor-only variant does not reproduce the performance of the full method.
+In this setting, we preserve the exact triggering condition of FLASH ($\text{ReLU(TD-error)} \times \text{Softplus(Value Difference)}$) but disable neighbor retrieval from the hash buckets. When an anchor is triggered, only its associated replay context is included in the imagination batch, without retrieving structurally similar historical contexts. Table~\ref{tab:neighbor_retrieval_ablation} compares Full FLASH ($n=16$) with No neighbor ($n=1$) on STORM, using the default anchor setting for both variants. For each game, we compare the same available training seeds across the two variants; this set can differ from the baseline--FLASH seed pairs used in Table~\ref{tab:main_performance}.
 
-\todo{Include comprehensive tables and graphs detailing the specific quantitative performance metrics across the evaluated environments for this ablation.}
+% BEGIN AUTO NEIGHBOR RETRIEVAL ABLATION
+\begin{table}[!t]
+\centering
+\small
+\caption{Neighbor retrieval ablation on STORM. Full FLASH uses retrieval target $n=16$; No neighbor uses $n=1$ (anchor only), both with the default anchor setting. Each game mean uses only training seeds with valid scores for both variants; $N$ is the number of paired seeds. Excluded training seeds are Frostbite: 10; BankHeist: 6020; Krull: 2000. The current comparison covers 12 games and 32 seed pairs. A dash indicates no paired results. Aggregate metrics use only games with paired results and the Random/Human references in Table~\ref{tab:main_performance}. Mean, Median, and Optimality Gap use human-normalized game means; IQM pools the unrounded per-seed human-normalized scores.}
+\label{tab:neighbor_retrieval_ablation}
+\begin{tabular}{lrrr}
+\toprule
+Game & $N$ & Full FLASH & No neighbor \\
+\midrule
+Alien & 4 & 1147.9 & 1031.9 \\
+Amidar & 2 & 162.3 & 178.1 \\
+Assault & 3 & 723.6 & 822.6 \\
+Asterix & 2 & 572.5 & 572.5 \\
+BankHeist & 0 & - & - \\
+BattleZone & 5 & 10120 & 8750 \\
+Boxing & 1 & 76.2 & 74.8 \\
+Breakout & 2 & 13.9 & 13.8 \\
+ChopperCommand & 1 & 970 & 1360 \\
+CrazyClimber & 0 & - & - \\
+DemonAttack & 0 & - & - \\
+Freeway & 0 & - & - \\
+Frostbite & 4 & 1986.8 & 2058.1 \\
+Gopher & 0 & - & - \\
+Hero & 0 & - & - \\
+Jamesbond & 0 & - & - \\
+Kangaroo & 0 & - & - \\
+Krull & 1 & 5889.5 & 6044 \\
+KungFuMaster & 0 & - & - \\
+MsPacman & 0 & - & - \\
+Pong & 0 & - & - \\
+PrivateEye & 0 & - & - \\
+Qbert & 4 & 2998.1 & 2768.4 \\
+RoadRunner & 0 & - & - \\
+Seaquest & 0 & - & - \\
+UpNDown & 3 & 5225.2 & 5304.7 \\
+\midrule
+\#Superhuman ($\uparrow$) &  & 2 & 3 \\
+Mean ($\uparrow$) &  & 1.112 & 1.132 \\
+Median ($\uparrow$) &  & 0.322 & 0.308 \\
+IQM ($\uparrow$) &  & 0.278 & 0.253 \\
+Optimality Gap ($\downarrow$) &  & 0.584 & 0.580 \\
+\bottomrule
+\end{tabular}
+\end{table}
+% END AUTO NEIGHBOR RETRIEVAL ABLATION
 
 \subsection{Ablation 2: Value Difference vs. Absolute Value}
 Here, we replace the temporal value difference ($|V(s_t) - V(s_{t-1})|$) in the triggering condition with the absolute state value ($V(s_t)$). Using the absolute value causes the anchor mechanism to trigger continuously once the agent enters a high-reward phase, leading to redundant sampling and a loss of focus. The temporal difference ensures that FLASH specifically targets the pivotal moments of value spikes, focusing anchor selection on changes in the estimated value.
