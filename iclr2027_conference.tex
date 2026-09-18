@@ -12,11 +12,6 @@
 \usepackage{url}
 \usepackage{color}
 
-% 색상반전
-\usepackage{xcolor}
-\pagecolor{black}
-\color{white}
-
 % 빈칸(TODO)을 쉽게 찾을 수 있도록 강조하는 매크로
 \newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
 
@@ -109,6 +104,8 @@ Here, we use blurry only to describe the visual appearance of decoded images, no
 \subsection{Probing the Latent Space}
 \label{subsec:probing_latent}
 
+\todo{더 줄이기. 핵심만 넣기}
+
 
 To formally investigate whether standard lightweight encoders successfully capture functionally critical elements, we conducted extensive probing experiments on the Seaquest environment. First, using images with perfectly identical backgrounds varying only the target elements, we observed that the pairwise cosine similarities of latent states encoding different diver counts and positions were strictly less than 1.0 (dropping to $0.86$ and $0.63$, respectively). This suggests sensitivity to changes in these target regions, motivating a direct test of whether a supervised probe can predict the corresponding task variables from latent states.
 
@@ -199,6 +196,14 @@ Having found that supervised probes can predict selected task-relevant variables
 
 We therefore investigate whether selectively controlling experience reuse can improve downstream learning while leaving the base agent's core architectures unchanged. Specifically, FLASH identifies salient learning events, retrieves structurally similar historical experiences, and groups them within the same Actor-Critic training batch. This intervention changes which previously encountered experiences are emphasized during optimization, rather than modifying the base agent's network architectures.
 
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{pipeline.pdf}
+\caption{Overview of the FLASH pipeline. (Left) During environment interaction, observations are encoded and projected into discrete hash keys registered in a hash bucket. (Right) Triggered anchors retrieve structurally similar replay contexts with matching hashes. Each retrieved target retains its recorded action; after this fixed action is applied, policy-driven imagination starts from the resulting model-predicted next state. The resulting groups replace part of the random imagination batch. \todo{remove white space. group anchor and 2 targets}}
+\label{fig:flash_pipeline}
+\end{figure}
+
 \section{METHODOLOGY}
 \label{sec:method}
 
@@ -208,12 +213,6 @@ We therefore investigate whether selectively controlling experience reuse can im
 Building on the findings in Section~\ref{sec:representation}, we aim to improve downstream Actor-Critic learning by selectively reusing informative experiences together with past contexts that have similar latent structure. However, repeatedly searching the entire replay buffer for similar contexts would introduce substantial computational overhead, undermining the lightweight nature of this intervention. FLASH therefore maintains a hash-indexed episodic memory to efficiently identify candidate contexts with similar latent structure, selects salient anchors using a surprise score, and incorporates the retrieved groups into Actor-Critic training batches. We describe the method in three parts: surprise-guided anchor selection (Section~\ref{subsec:flash_retrieval}), hash-indexed retrieval and memory maintenance (Section~\ref{subsec:flash_memory}), and integration into Actor-Critic learning (Section~\ref{subsec:flash_learning}). The complete FLASH procedure is summarized in Appendix~\ref{app:flash_algorithm}.
 
 
-\begin{figure}[t]
-\centering
-\includegraphics[width=\textwidth]{pipeline.pdf}
-\caption{Overview of the FLASH pipeline. (Left) During environment interaction, observations are encoded and projected into discrete hash keys registered in a hash bucket. (Right) Triggered anchors retrieve structurally similar replay contexts with matching hashes. Each retrieved target retains its recorded action; after this fixed action is applied, policy-driven imagination starts from the resulting model-predicted next state. The resulting groups replace part of the random imagination batch.}
-\label{fig:flash_pipeline}
-\end{figure}
 
 
 \subsection{Surprise-Guided Anchor Selection}
