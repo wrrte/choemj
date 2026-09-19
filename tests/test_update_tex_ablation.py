@@ -11,7 +11,7 @@ import pandas as pd
 
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / 'STORM'))
+sys.path.insert(0, str(ROOT / 'STORM-1/results'))
 try:
     import update_tex_ablation as ablation
 finally:
@@ -75,7 +75,7 @@ class AblationTests(unittest.TestCase):
                 'BankHeist': ([100.0], [200.0]),
             })
             subprocess.run(
-                [sys.executable, str(ROOT / 'STORM/update_tex_ablation.py'),
+                [sys.executable, str(ROOT / 'STORM-1/results/update_tex_ablation.py'),
                  '--excel', str(excel), '--tex', str(tex)],
                 cwd=directory, check=True, capture_output=True, text=True,
             )

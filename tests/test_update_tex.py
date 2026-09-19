@@ -12,7 +12,7 @@ import pandas as pd
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = (ROOT / "STORM/update_tex.py", ROOT / "Drama/results/update_tex.py")
+SCRIPTS = (ROOT / "STORM-1/results/update_tex.py", ROOT / "Drama/results/update_tex.py")
 
 
 def load_script(path):
