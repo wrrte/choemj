@@ -16,7 +16,7 @@
 % 빈칸(TODO)을 쉽게 찾을 수 있도록 강조하는 매크로
 \newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
 
-\title{Amplifying Exploitation in Visual Reinforcement Learning through Episodic Retrieval}
+\title{Improving Actor–Critic Training in Visual Reinforcement Learning through Task-Relevant Experience Retrieval}
 
 \author{\todo{Author 1 Name} \\
 \todo{Author 1 Affiliation} \\
@@ -37,7 +37,8 @@
 \maketitle
 
 \begin{abstract}
-Recent advances in visual reinforcement learning (RL) have increasingly improved control performance through higher-fidelity generative world models and visual representations, often at additional computational cost. However, our probing experiments show that lightweight latent representations can retain substantial task-relevant information even when visual reconstruction is imperfect, suggesting that representation fidelity alone may not determine downstream control performance. These findings suggest that downstream utilization of task-relevant information already available in latent representations may itself be an important bottleneck. We therefore propose Fast Latent Anchor Search with Hashing (FLASH), which uses salient learning events as retrieval anchors, efficiently identifies structurally similar historical contexts through a hash-indexed episodic memory, and jointly reuses these contexts in Actor--Critic learning. In this way, FLASH improves downstream experience utilization without replacing the underlying encoder or world-model architectures. Across Atari 100k, FLASH improves performance in multiple environments, with aggregate effects varying across the evaluated base agents, while adding only 5.11--7.41\% wall-clock training time to STORM.
+Recent advances in visual reinforcement learning (visual RL) have increasingly improved control performance through higher-fidelity generative world models and visual representations, often at additional computational cost. However, our probing experiments show that lightweight latent representations can retain substantial task-relevant information even when visual reconstruction is imperfect, suggesting that representation fidelity alone may not determine downstream control performance. These findings suggest that downstream utilization of task-relevant information already available in latent representations may itself be an important bottleneck. We therefore propose Fast Latent Anchor Search with Hashing (FLASH), which uses salient learning events as retrieval anchors to identify structurally similar historical contexts through a hash-indexed episodic memory. FLASH jointly reuses these contexts in Actor--Critic learning, improving downstream experience utilization without replacing the underlying encoder or world-model architectures. Across Atari 100k, FLASH improves performance in multiple environments, with aggregate effects varying across the evaluated base agents. Notably, these gains come with only a 5.11--7.41\% increase in wall-clock training time on STORM.
+
 \end{abstract}
 
 \section{Introduction}
@@ -329,27 +330,27 @@ Breakout      & 1.7 & 30.5 & 11.7 & 12.4 & \textcolor{green}{+0.7} & 16.4 & 18.9
 ChopperCommand & 811.0 & 7387.8 & 1598.3 & 1225 & \textcolor{red}{-373.3} & 1350 & 1390 & \textcolor{green}{+40} \\
 CrazyClimber  & 10780.5 & 35829.4 & 57571.7 & 57908.3 & \textcolor{green}{+336.6} & 74810 & 74070 & \textcolor{red}{-740} \\
 DemonAttack   & 152.1 & 1971.0 & 193 & 171.5 & \textcolor{red}{-21.5} & 187.2 & 151 & \textcolor{red}{-36.2} \\
-Freeway       & 0.0 & 29.6 & - & - & - & - & - & - \\
+Freeway       & 0.0 & 29.6 & 33.3 & 33.1 & \textcolor{red}{-0.2} & - & - & - \\
 Frostbite     & 65.2 & 4334.7 & 1742.4 & 1986.8 & \textcolor{green}{+244.4} & 1101.2 & 1105.4 & \textcolor{green}{+4.2} \\
-Gopher        & 257.6 & 2412.5 & 3362.7 & 2720.3 & \textcolor{red}{-642.4} & 1760 & 1851 & \textcolor{green}{+91} \\
+Gopher        & 257.6 & 2412.5 & 3747 & 3578 & \textcolor{red}{-169} & 1760 & 1851 & \textcolor{green}{+91} \\
 Hero          & 1027.0 & 30826.4 & 13178 & 13269.4 & \textcolor{green}{+91.4} & 8921.6 & 6903.9 & \textcolor{red}{-2017.7} \\
-Jamesbond     & 29.0 & 302.8 & - & - & - & 420 & 525 & \textcolor{green}{+105} \\
+Jamesbond     & 29.0 & 302.8 & 522.5 & 665 & \textcolor{green}{+142.5} & 420 & 525 & \textcolor{green}{+105} \\
 Kangaroo      & 52.0 & 3035.0 & 1430 & 1445 & \textcolor{green}{+15} & 1700 & 1800 & \textcolor{green}{+100} \\
 Krull         & 1598.0 & 2665.5 & 5908.2 & 6427.5 & \textcolor{green}{+519.3} & 9520 & 8965.3 & \textcolor{red}{-554.7} \\
 KungFuMaster  & 258.5 & 22736.3 & 25137.5 & 25177.5 & \textcolor{green}{+40} & 15413.3 & 15996.7 & \textcolor{green}{+583.4} \\
-MsPacman      & 307.3 & 6951.6 & - & - & - & 2868 & 2961 & \textcolor{green}{+93} \\
+MsPacman      & 307.3 & 6951.6 & 1754 & 1886.5 & \textcolor{green}{+132.5} & 2868 & 2961 & \textcolor{green}{+93} \\
 Pong          & -20.7 & 14.6 & 5.6 & 9 & \textcolor{green}{+3.4} & 8.8 & 14.7 & \textcolor{green}{+5.9} \\
-PrivateEye    & 24.9 & 69571.3 & 100 & 20 & \textcolor{red}{-80} & 100 & -59.7 & \textcolor{red}{-159.7} \\
+PrivateEye    & 24.9 & 69571.3 & 153.0 & 121.7 & \textcolor{red}{-31.3} & 100 & -59.7 & \textcolor{red}{-159.7} \\
 Qbert         & 163.9 & 13455.0 & 2875.2 & 2920.2 & \textcolor{green}{+45} & 633.8 & 801.2 & \textcolor{green}{+167.4} \\
 RoadRunner    & 11.5 & 7845.0 & 8936.2 & 11597.5 & \textcolor{green}{+2661.3} & 7445 & 8510 & \textcolor{green}{+1065} \\
-Seaquest      & 68.4 & 42054.7 & 470 & 545 & \textcolor{green}{+75} & 483 & 466 & \textcolor{red}{-17} \\
+Seaquest      & 68.4 & 42054.7 & 460.7 & 505.3 & \textcolor{green}{+44.6} & 483 & 466 & \textcolor{red}{-17} \\
 UpNDown       & 533.4 & 11693.2 & 5022 & 5225.2 & \textcolor{green}{+203.2} & 4661.5 & 5158.5 & \textcolor{green}{+497} \\
 \midrule
-\#Superhuman ($\uparrow$) & 0 & N/A & 7 & 6 & \textcolor{red}{-1} & 4 & 6 & \textcolor{green}{+2} \\
-Mean ($\uparrow$) & 0.000 & 1.000 & 0.914 & 0.919 & \textcolor{green}{+0.005} & 0.930 & 0.965 & \textcolor{green}{+0.035} \\
-Median ($\uparrow$) & 0.000 & 1.000 & 0.402 & 0.420 & \textcolor{green}{+0.018} & 0.370 & 0.399 & \textcolor{green}{+0.029} \\
-IQM ($\uparrow$) & 0.000 & 1.000 & 0.436 & 0.432 & \textcolor{red}{-0.004} & 0.343 & 0.354 & \textcolor{green}{+0.011} \\
-Optimality Gap ($\downarrow$) & 1.000 & 0.000 & 0.509 & 0.509 & 0.000 & 0.560 & 0.547 & \textcolor{green}{-0.013} \\
+\#Superhuman ($\uparrow$) & 0 & N/A & 9 & 8 & \textcolor{red}{-1} & 4 & 6 & \textcolor{green}{+2} \\
+Mean ($\uparrow$) & 0.000 & 1.000 & 0.937 & 0.969 & \textcolor{green}{+0.032} & 0.930 & 0.965 & \textcolor{green}{+0.035} \\
+Median ($\uparrow$) & 0.000 & 1.000 & 0.405 & 0.435 & \textcolor{green}{+0.030} & 0.370 & 0.399 & \textcolor{green}{+0.029} \\
+IQM ($\uparrow$) & 0.000 & 1.000 & 0.423 & 0.433 & \textcolor{green}{+0.010} & 0.343 & 0.354 & \textcolor{green}{+0.011} \\
+Optimality Gap ($\downarrow$) & 1.000 & 0.000 & 0.480 & 0.480 & 0.000 & 0.560 & 0.547 & \textcolor{green}{-0.013} \\
 \bottomrule
 \end{tabular}
 }
@@ -1106,17 +1107,8 @@ Finally, the resulting score has a different role from a conventional replay pri
 \section{AI use statement}
 
 Using LLM:
-Wrote and modified Python code to generate cropped images for probing
 
-Added logic to generate probing videos during training
-Analyzed existing code for storm, drama, twister, etc., and identified the locations of necessary logic
 
-WANDB log-related tasks
-
-Wrote Python code to generate heatmaps
-
-Python code to select evaluation scores from WANDB runs that meet specific conditions and export them to an xlsx file. Writing Python code to automatically incorporate the experimental results recorded in the xlsx file into the performance table within the paper’s TeX file
-Generating table formats during paper writing
-
+writing paper, especially in tables
 
 \end{document}
