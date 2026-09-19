@@ -12,10 +12,6 @@
 \usepackage{url}
 \usepackage{color}
 
-% 색상반전
-\usepackage{xcolor}
-\pagecolor{black}
-\color{white}
 
 % 빈칸(TODO)을 쉽게 찾을 수 있도록 강조하는 매크로
 \newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
@@ -41,7 +37,7 @@
 \maketitle
 
 \begin{abstract}
-Recent advances in visual Reinforcement Learning (RL) have increasingly adopted high-fidelity generative world models to improve representation quality, but these approaches can incur substantial computational cost. We investigate a complementary question: whether improving the representation itself is the only effective intervention, or whether downstream learning can make better use of information already retained in compact latent states. Our probing experiments show that lightweight encoders can preserve substantial task-relevant information despite poor visual reconstruction, indicating that reconstruction quality alone is insufficient to diagnose the absence of such information. We further observe substantial run-to-run variation in DRAMA on Seaquest under the same implementation and hyperparameter configuration, suggesting that stochastic training trajectories, the experiences collected along them, and how those experiences influence downstream learning may also matter. Motivated by these observations, we propose Fast Latent Anchor Search with Hashing (FLASH), a plug-and-play retrieval module that identifies salient learning events using a surprise score, retrieves structurally similar past experiences through a hash-indexed episodic memory, and incorporates them into Actor-Critic training batches. FLASH leaves the base agent's encoder and world-model architectures unchanged and instead modifies which previously encountered experiences are emphasized during downstream optimization. Across Atari 100k, FLASH yields performance gains in multiple environments, while its aggregate effect varies across the evaluated baselines; for STORM, it adds only 5.11--7.41\% wall-clock training time across the evaluated GPUs. These results suggest that targeted experience emphasis can complement representation-centric approaches by helping downstream learning make more effective use of the information and experiences already available to the agent.
+Recent advances in visual reinforcement learning (RL) have increasingly improved control performance through higher-fidelity generative world models and visual representations, often at additional computational cost. However, our probing experiments show that lightweight latent representations can retain substantial task-relevant information even when visual reconstruction is imperfect, suggesting that representation fidelity alone may not determine downstream control performance. These findings suggest that downstream utilization of task-relevant information already available in latent representations may itself be an important bottleneck. We therefore propose Fast Latent Anchor Search with Hashing (FLASH), which uses salient learning events as retrieval anchors, efficiently identifies structurally similar historical contexts through a hash-indexed episodic memory, and jointly reuses these contexts in Actor--Critic learning. In this way, FLASH improves downstream experience utilization without replacing the underlying encoder or world-model architectures. Across Atari 100k, FLASH improves performance in multiple environments, with aggregate effects varying across the evaluated base agents, while adding only 5.11--7.41\% wall-clock training time to STORM.
 \end{abstract}
 
 \section{Introduction}
@@ -81,6 +77,8 @@ Appendix~\ref{sec:appendix_related_work} provides further background and compari
 
 \section{Problem Analysis and Motivation}
 \label{sec:representation}
+
+\todo{It must be made clear that the experimental results show that the peak of the downstream method is not low.}
 
 Poor visual reconstruction naturally raises the concern that a compact latent state may have discarded information needed for control. However, reconstruction quality alone does not determine which task-relevant distinctions remain encoded in the latent state. As a motivating observation, consider the open-loop imagined trajectory in Figure~\ref{fig:temporal_persistence}. During open-loop imagination, the model predicts future states using only its internal transition dynamics, without access to real observations. The highlighted fish appears less blurry at $t$, more blurry at $t+1$, and less blurry again at $t+2$. This non-monotonic change in decoded appearance raises the possibility that visual fidelity and the information retained by the predictive state need not vary together in a simple way. The observation does not establish information preservation; instead, it motivates examining the latent representation directly. Throughout this section, we use \emph{blurry} only to describe the visual appearance of decoded images, not the information content of latent states.
 
@@ -324,7 +322,7 @@ Alien         & 227.8 & 7127.7 & 1041.8 & 1091.1 & \textcolor{green}{+49.3} & 10
 Amidar        & 5.8 & 1719.5 & 175.9 & 150.5 & \textcolor{red}{-25.4} & 140.3 & 130.2 & \textcolor{red}{-10.1} \\
 Assault       & 222.4 & 742.0 & 764.4 & 701.0 & \textcolor{red}{-63.4} & 383.5 & 449.9 & \textcolor{green}{+66.4} \\
 Asterix       & 210.0 & 8503.3 & 677.5 & 759.4 & \textcolor{green}{+81.9} & 1680 & 1397.5 & \textcolor{red}{-282.5} \\
-BankHeist     & 14.2 & 753.1 & 431 & 401.5 & \textcolor{red}{-29.5} & 372.5 & 296 & \textcolor{red}{-76.5} \\
+BankHeist     & 14.2 & 753.1 & 510.2 & 456 & \textcolor{red}{-54.2} & 372.5 & 296 & \textcolor{red}{-76.5} \\
 BattleZone    & 2360.0 & 37187.5 & 10575 & 10608.3 & \textcolor{green}{+33.3} & 8966.7 & 8233.3 & \textcolor{red}{-733.4} \\
 Boxing        & 0.1 & 12.1 & 73.3 & 68.6 & \textcolor{red}{-4.7} & 58.5 & 65.7 & \textcolor{green}{+7.2} \\
 Breakout      & 1.7 & 30.5 & 11.7 & 12.4 & \textcolor{green}{+0.7} & 16.4 & 18.9 & \textcolor{green}{+2.5} \\
@@ -337,21 +335,21 @@ Gopher        & 257.6 & 2412.5 & 3362.7 & 2720.3 & \textcolor{red}{-642.4} & 176
 Hero          & 1027.0 & 30826.4 & 13178 & 13269.4 & \textcolor{green}{+91.4} & 8921.6 & 6903.9 & \textcolor{red}{-2017.7} \\
 Jamesbond     & 29.0 & 302.8 & - & - & - & 420 & 525 & \textcolor{green}{+105} \\
 Kangaroo      & 52.0 & 3035.0 & 1430 & 1445 & \textcolor{green}{+15} & 1700 & 1800 & \textcolor{green}{+100} \\
-Krull         & 1598.0 & 2665.5 & 5778.2 & 6135.5 & \textcolor{green}{+357.3} & 9520 & 8965.3 & \textcolor{red}{-554.7} \\
+Krull         & 1598.0 & 2665.5 & 5908.2 & 6427.5 & \textcolor{green}{+519.3} & 9520 & 8965.3 & \textcolor{red}{-554.7} \\
 KungFuMaster  & 258.5 & 22736.3 & 25137.5 & 25177.5 & \textcolor{green}{+40} & 15413.3 & 15996.7 & \textcolor{green}{+583.4} \\
 MsPacman      & 307.3 & 6951.6 & - & - & - & 2868 & 2961 & \textcolor{green}{+93} \\
 Pong          & -20.7 & 14.6 & 5.6 & 9 & \textcolor{green}{+3.4} & 8.8 & 14.7 & \textcolor{green}{+5.9} \\
-PrivateEye    & 24.9 & 69571.3 & - & - & - & 100 & -59.7 & \textcolor{red}{-159.7} \\
+PrivateEye    & 24.9 & 69571.3 & 100 & 20 & \textcolor{red}{-80} & 100 & -59.7 & \textcolor{red}{-159.7} \\
 Qbert         & 163.9 & 13455.0 & 2875.2 & 2920.2 & \textcolor{green}{+45} & 633.8 & 801.2 & \textcolor{green}{+167.4} \\
-RoadRunner    & 11.5 & 7845.0 & 8530 & 9803.3 & \textcolor{green}{+1273.3} & 7445 & 8510 & \textcolor{green}{+1065} \\
-Seaquest      & 68.4 & 42054.7 & - & - & - & 483 & 466 & \textcolor{red}{-17} \\
+RoadRunner    & 11.5 & 7845.0 & 8936.2 & 11597.5 & \textcolor{green}{+2661.3} & 7445 & 8510 & \textcolor{green}{+1065} \\
+Seaquest      & 68.4 & 42054.7 & 470 & 545 & \textcolor{green}{+75} & 483 & 466 & \textcolor{red}{-17} \\
 UpNDown       & 533.4 & 11693.2 & 5022 & 5225.2 & \textcolor{green}{+203.2} & 4661.5 & 5158.5 & \textcolor{green}{+497} \\
 \midrule
 \#Superhuman ($\uparrow$) & 0 & N/A & 7 & 6 & \textcolor{red}{-1} & 4 & 6 & \textcolor{green}{+2} \\
-Mean ($\uparrow$) & 0.000 & 1.000 & 0.988 & 0.978 & \textcolor{red}{-0.010} & 0.930 & 0.965 & \textcolor{green}{+0.035} \\
-Median ($\uparrow$) & 0.000 & 1.000 & 0.408 & 0.450 & \textcolor{green}{+0.042} & 0.370 & 0.399 & \textcolor{green}{+0.029} \\
-IQM ($\uparrow$) & 0.000 & 1.000 & 0.432 & 0.433 & \textcolor{green}{+0.001} & 0.343 & 0.354 & \textcolor{green}{+0.011} \\
-Optimality Gap ($\downarrow$) & 1.000 & 0.000 & 0.468 & 0.467 & \textcolor{green}{-0.001} & 0.560 & 0.547 & \textcolor{green}{-0.013} \\
+Mean ($\uparrow$) & 0.000 & 1.000 & 0.914 & 0.919 & \textcolor{green}{+0.005} & 0.930 & 0.965 & \textcolor{green}{+0.035} \\
+Median ($\uparrow$) & 0.000 & 1.000 & 0.402 & 0.420 & \textcolor{green}{+0.018} & 0.370 & 0.399 & \textcolor{green}{+0.029} \\
+IQM ($\uparrow$) & 0.000 & 1.000 & 0.436 & 0.432 & \textcolor{red}{-0.004} & 0.343 & 0.354 & \textcolor{green}{+0.011} \\
+Optimality Gap ($\downarrow$) & 1.000 & 0.000 & 0.509 & 0.509 & 0.000 & 0.560 & 0.547 & \textcolor{green}{-0.013} \\
 \bottomrule
 \end{tabular}
 }
